@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Staff - Wonderhills College</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo">
+                <div>
+                <h1><span>Wonderhills</span> College</h1>
+                <div class="motto">"Raising Saintly Scholars"</div>
+            </div>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="about.html">About</a></li>
+                    <li><a href="staff.html">Staff</a></li>
+                    <li><a href="news.html">News</a></li>
+                    <li><a href="contact.html">Contact</a></li>
+                    <li><a href="admission.html">Admission</a></li>
+                    <li><a href="login.html" class="btn-login">Login</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 4rem 0;">
+            <div class="container">
+                <h2 style="text-align:center; color:#4a2c1a;">Our Esteemed Staff</h2>
+                <p style="text-align:center; margin-bottom: 2rem;">Dedicated professionals shaping the future.</p>
+
+                <div id="staffContainer">
+                    <p style="text-align:center;">Loading staff members...</p>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script>
+        // Load staff when page loads
+        document.addEventListener('DOMContentLoaded', function() {
+            if (typeof loadPublicStaff === 'function') {
+                loadPublicStaff();
+            }
+        });
+    </script>
+</body>
+</html>

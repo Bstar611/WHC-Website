@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Teacher Dashboard - Wonderhills</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo"><img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#" id="logoutBtn" onclick="handleLogout(); return false;" class="btn-login" style="background:#b91c1c;">Logout</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 3rem 0;">
+            <div class="container">
+                <h2 style="color:#4a2c1a;">👨‍🏫 Teacher Dashboard</h2>
+                <div id="userInfo"></div>
+
+                <!-- Weekly Scores -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="color:#4a2c1a;">📝 Weekly Test Scores</h3>
+                    <p>Enter weekly test scores for your assigned subjects.</p>
+                    <div id="teacherSubjectArea" style="margin-top: 1rem;">
+                        <p>Loading your subjects...</p>
+                    </div>
+                </div>
+
+                <!-- Exam Scores -->
+                <div style="margin-top: 3rem;">
+                    <h3 style="color:#4a2c1a;">📄 Exam Scores</h3>
+                    <p>Enter end of term exam scores for your assigned class.</p>
+                    <div id="teacherClassList" style="margin-top: 1rem;">
+                        <p>Loading your classes...</p>
+                    </div>
+                    <div id="classStudentArea" style="margin-top: 1rem;"></div>
+                </div>
+
+                <!-- Assignments -->
+                <div style="margin-top: 3rem;">
+                    <h3 style="color:#4a2c1a;">📝 Assignments</h3>
+                    <p>Create assignments and track completion per student — feeds into report cards and AI analytics.</p>
+                    <div id="assignmentSubjectArea" style="margin-top: 1rem;">
+                        <p>Loading your subjects...</p>
+                    </div>
+                </div>
+
+                <!-- Attendance -->
+                <div style="margin-top: 3rem;">
+                    <h3 style="color:#4a2c1a;">📋 Mark Attendance</h3>
+                    <p>Mark attendance for your assigned class.</p>
+                    <div id="attendanceClassList" style="margin-top: 1rem;">
+                        <p>Loading your classes...</p>
+                    </div>
+                    <div id="attendanceArea" style="margin-top: 1rem; display:none;">
+                        <div id="attendanceStudentList"></div>
+                        <button onclick="saveAttendance()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">
+                            💾 Save Attendance
+                        </button>
+                        <div id="attendanceStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+                </div>
+
+                <!-- Character Assessment -->
+                <div style="margin-top: 3rem;">
+                    <h3 style="color:#4a2c1a;">🌟 Character Assessment</h3>
+                    <p>Rate your class on punctuality, neatness, attitude, participation, and honesty. This feeds into report cards and AI analytics — only class (homeroom) teachers do this, once per term.</p>
+                    <div id="characterClassList" style="margin-top: 1rem;">
+                        <p>Loading your classes...</p>
+                    </div>
+                    <div id="characterArea" style="margin-top: 1rem; display:none;">
+                        <div id="characterStudentList"></div>
+                        <button onclick="saveCharacterAssessments()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">
+                            💾 Save Character Assessments
+                        </button>
+                        <div id="characterStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+                </div>
+
+                <!-- AI Analytics -->
+                <div style="margin-top: 3rem;">
+                    <div id="teacherAIAnalyticsContainer">
+                        <p>Loading AI analytics...</p>
+                    </div>
+                </div>
+
+                <div id="teacherStudentRiskContainer" style="margin-top: 1rem;"></div>
+
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

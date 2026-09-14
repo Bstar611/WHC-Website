@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student Dashboard - Wonderhills</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo"><img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#" id="logoutBtn" onclick="handleLogout(); return false;" class="btn-login" style="background:#b91c1c;">Logout</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 3rem 0;">
+            <div class="container">
+                <h2 style="color:#4a2c1a;">📚 Student Dashboard</h2>
+                <div id="userInfo"></div>
+
+                <!-- Profile -->
+                <div id="studentProfile" style="margin-top: 2rem;"></div>
+
+                <!-- Report Card -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="color:#4a2c1a;">📄 My Report Card</h3>
+                    <div id="reportContainer">
+                        <p>Loading your report card...</p>
+                    </div>
+                </div>
+
+                <!-- Weekly Averages -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="color:#4a2c1a;">📊 Weekly Averages</h3>
+                    <p style="font-size:0.9rem; color:#6b3a2a;">Your average score each week, across whatever subjects were actually tested that week.</p>
+                    <div id="weeklyAveragesContainer">
+                        <p>Loading...</p>
+                    </div>
+                </div>
+
+                <!-- AI Analytics -->
+                <div style="margin-top: 2rem;">
+                    <div id="aiAnalyticsContainer">
+                        <p>Loading AI analytics...</p>
+                    </div>
+                </div>
+
+                <!-- Attendance -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="color:#4a2c1a;">📋 My Attendance</h3>
+                    <div id="studentAttendance">
+                        <p>Loading your attendance...</p>
+                    </div>
+                </div>
+
+                <!-- Timetable -->
+                <div style="margin-top: 2rem;">
+                    <h3 style="color:#4a2c1a;">📅 My Timetable</h3>
+                    <div id="studentTimetable">
+                        <p>Loading your timetable...</p>
+                    </div>
+                </div>
+
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

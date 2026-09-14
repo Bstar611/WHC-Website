@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Admin Dashboard - Wonderhills</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo"><img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#" id="logoutBtn" onclick="handleLogout(); return false;" class="btn-login" style="background:#b91c1c;">Logout</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 3rem 0;">
+            <div class="container">
+                <h2 style="color:#4a2c1a;">⚙️ Admin Dashboard</h2>
+                <div id="userInfo"></div>
+
+                <div id="adminOverviewStats" style="display:flex; gap:1rem; flex-wrap:wrap; margin-top:1.5rem;">
+                    <p>Loading overview...</p>
+                </div>
+
+                <div class="glass-card" style="margin-top:1.5rem; text-align:center; max-width:500px;">
+                    <h3>👤 My Profile Photo</h3>
+                    <div id="myProfilePhotoContainer"><p>Loading...</p></div>
+                </div>
+
+                <div class="glass-card" style="margin-top:1.5rem; text-align:center; max-width:500px;">
+                    <h3>✍️ Principal's Digital Signature</h3>
+                    <p style="font-size:0.85rem; color:#666;">Upload a scanned or digitally-created signature image (PNG with transparent background works best) — it will appear on every report card instead of a blank line.</p>
+                    <div id="principalSignaturePreview" style="margin:0.8rem 0;"><p>Loading...</p></div>
+                    <label class="btn-primary" style="display:inline-block; cursor:pointer; padding:0.6rem 1.5rem;">
+                        Upload Signature
+                        <input type="file" accept="image/*" onchange="uploadPrincipalSignature(this)" style="display:none;">
+                    </label>
+                </div>
+
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 2rem; margin-top: 2rem;">
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE TEACHERS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>👨‍🏫 Manage Teachers</h3>
+                        <p>Add or update teacher profiles.</p>
+                        <button onclick="showAddTeacherForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add Teacher</button>
+                        <div id="teacherFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="teacherName" placeholder="Full Name" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="email" id="teacherEmail" placeholder="Email (so their account auto-links when they sign up)" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="text" id="teacherQualification" placeholder="Qualification" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="text" id="teacherSubject" placeholder="Subject" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="number" id="teacherExperience" placeholder="Years of Experience" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="file" id="teacherPhotoFile" accept="image/*" style="width:100%; margin-bottom:0.5rem; padding:0.5rem; border:1px solid #ccc; border-radius:8px;">
+                            <div id="teacherPhotoPreview" style="display:none; margin-bottom:0.5rem;">
+                                <img id="teacherPhotoPreviewImg" src="#" alt="Preview" style="width:80px; height:80px; border-radius:50%; object-fit:cover; border:2px solid #d4a373;">
+                            </div>
+                            <textarea id="teacherBio" rows="2" placeholder="Short Bio" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;"></textarea>
+                            <button onclick="saveTeacher()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Teacher</button>
+                        </div>
+                        <input type="text" id="teacherSearchInput" oninput="filterTeacherList()" placeholder="🔍 Search by name, subject, or email..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
+                        <div id="teacherList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE SUBJECTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>📖 Manage Subjects</h3>
+                        <p>Add subjects and assign teachers.</p>
+                        <button onclick="showAddSubjectForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add Subject</button>
+                        <div id="subjectFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="subjectName" placeholder="Subject Name" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <select id="subjectClass" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Class</option>
+                            </select>
+                            <select id="subjectTeacher" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Teacher</option>
+                            </select>
+                            <button onclick="saveSubject()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Subject</button>
+                        </div>
+                        <input type="text" id="subjectSearchInput" oninput="filterSubjectList()" placeholder="🔍 Search by subject, class, or teacher..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
+                        <div id="subjectList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE STUDENTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>🎓 Manage Students</h3>
+                        <p>Register students and assign classes.</p>
+                        <button onclick="showAddStudentForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add Student</button>
+                        <div id="studentFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="studentName" placeholder="Full Name" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <select id="studentClass" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Class</option>
+                            </select>
+                            <input type="email" id="studentEmail" placeholder="Student Email (optional)" style="width:100%; margin-bottom:0.3rem; padding:0.5rem;">
+                            <small style="color:#666; display:block; margin-bottom:0.5rem;">If you add an email, this student's account will auto-link the moment they sign up with it. You can leave it blank and add it later.</small>
+                            <button onclick="saveStudent()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Student</button>
+                        </div>
+                        <input type="text" id="studentSearchInput" oninput="filterStudentList()" placeholder="🔍 Search by name, admission number, or email..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
+                        <div id="studentList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- PROMOTE USER (admin/teacher role management) -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>🔑 Promote User</h3>
+                        <p style="font-size:0.85rem;">Since admin access can never come from signup itself, use this to grant another existing account admin or teacher access directly. They must have already signed up.</p>
+                        <input type="email" id="promoteUserEmail" placeholder="Their email" style="width:100%; margin-top:0.5rem; margin-bottom:0.5rem; padding:0.5rem;">
+                        <select id="promoteUserRole" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <option value="admin">Administrator</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="student">Student</option>
+                            <option value="parent">Parent</option>
+                        </select>
+                        <button onclick="promoteUserRole()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Update Role</button>
+                        <div id="promoteUserStatus" style="margin-top:0.8rem; font-weight:bold; font-size:0.9rem;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- PROMOTE / GRADUATE STUDENTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>🎓 Promote / Graduate Students</h3>
+                        <p>Move an entire class up (e.g. JSS1 → JSS2) or graduate a final-year class. Past report cards stay exactly as they were, regardless of a student's current class.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem; align-items:flex-end;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">From Class</label>
+                                <select id="promoteFromClass" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Select a class...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">To</label>
+                                <select id="promoteToClass" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:220px;">
+                                    <option value="">Select a class...</option>
+                                </select>
+                            </div>
+                            <button onclick="promoteStudents()" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 2rem;">Promote</button>
+                        </div>
+                        <div id="promoteStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE ACADEMIC YEARS & TERMS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>🗓️ Manage Academic Years & Terms</h3>
+                        <p>Terms live inside a Year (e.g. 2026 contains First, Second, Third Term). Control which term is active — teachers can only enter scores for the active one.</p>
+                        <button onclick="showAddYearForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">+ Add Academic Year</button>
+                        <div id="yearFormContainer" style="margin-top:1rem; display:none; max-width:400px; margin-left:auto; margin-right:auto;">
+                            <input type="text" id="yearName" placeholder="e.g. 2027" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <button onclick="saveAcademicYear()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Year</button>
+                        </div>
+
+                        <div id="termFormContainer" style="margin-top:1rem; display:none; max-width:400px; margin-left:auto; margin-right:auto; text-align:left; border:1px solid #d4a373; border-radius:8px; padding:1rem;">
+                            <h5 style="text-align:center;">Add Term</h5>
+                            <input type="text" id="termName" placeholder="e.g. First Term" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="number" id="termWeeksCount" placeholder="Number of weeks" value="8" min="1" max="20" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <button onclick="saveTerm()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Term</button>
+                        </div>
+
+                        <div id="yearList" style="margin-top:1.5rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- WEEKLY TEST SCHEDULE (subject approval per week) -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>✅ Weekly Test Schedule</h3>
+                        <p>Approve which subjects are actually being tested in a class for a given week. Teachers can only enter scores for subjects you've approved here — this is a hard requirement, not just a suggestion.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem; align-items:flex-end;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Class</label>
+                                <select id="scheduleClassSelect" onchange="loadWeeklyScheduleForClassWeek()" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Select a class...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Week</label>
+                                <input type="number" id="scheduleWeekInput" value="1" min="1" max="20" onchange="loadWeeklyScheduleForClassWeek()" style="width:80px; padding:0.5rem; border-radius:8px; border:1px solid #ccc;">
+                            </div>
+                        </div>
+                        <div id="scheduleSubjectChecklist" style="margin-top:1.5rem; text-align:left; max-width:500px; margin-left:auto; margin-right:auto;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE TIMETABLE -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>🗓️ Manage Timetable</h3>
+                        <p>Set weekly class schedules — students see their own class's timetable automatically.</p>
+                        <select id="timetableClassSelect" onchange="loadTimetableForClass(this.value)" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:200px; margin-top:0.5rem;">
+                            <option value="">Select a class...</option>
+                        </select>
+
+                        <div id="timetableFormContainer" style="margin-top:1.5rem; display:none; text-align:left; max-width:500px; margin-left:auto; margin-right:auto;">
+                            <h4 style="text-align:center;">Add Timetable Entry</h4>
+                            <select id="timetableSubjectSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Subject</option>
+                            </select>
+                            <select id="timetableTeacherSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Teacher (optional)</option>
+                            </select>
+                            <select id="timetableDaySelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="Monday">Monday</option>
+                                <option value="Tuesday">Tuesday</option>
+                                <option value="Wednesday">Wednesday</option>
+                                <option value="Thursday">Thursday</option>
+                                <option value="Friday">Friday</option>
+                            </select>
+                            <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                                <input type="time" id="timetableStartTime" style="flex:1; padding:0.5rem;">
+                                <input type="time" id="timetableEndTime" style="flex:1; padding:0.5rem;">
+                            </div>
+                            <button onclick="saveTimetableEntry()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Add Entry</button>
+                        </div>
+
+                        <div id="timetableEntryList" style="margin-top:1.5rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE CLASSES -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>📚 Manage Classes</h3>
+                        <p>Add or remove classes.</p>
+                        <button onclick="showAddClassForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add Class</button>
+                        <div id="classFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="className" placeholder="Class Name" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <select id="classSection" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="Junior">Junior</option>
+                                <option value="Senior">Senior</option>
+                            </select>
+                            <button onclick="saveClass()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Class</button>
+                        </div>
+                        <div id="classList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE DEPARTMENTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>🏛️ Manage Departments</h3>
+                        <p>Add or remove departments.</p>
+                        <button onclick="showAddDepartmentForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add Department</button>
+                        <div id="departmentFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="departmentName" placeholder="Department Name" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <input type="text" id="departmentDescription" placeholder="Description" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <button onclick="saveDepartment()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Department</button>
+                        </div>
+                        <div id="departmentList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MANAGE NEWS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>📰 Manage News</h3>
+                        <p>Add school news and announcements.</p>
+                        <button onclick="showAddNewsForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Add News</button>
+                        <div id="newsFormContainer" style="margin-top:1rem; display:none;">
+                            <input type="text" id="newsTitle" placeholder="News Title" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                            <textarea id="newsContent" rows="3" placeholder="News Content" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;"></textarea>
+                            <button onclick="saveNews()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save News</button>
+                        </div>
+                        <input type="text" id="newsSearchInput" oninput="filterNewsList()" placeholder="🔍 Search news..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
+                        <div id="newsList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- CLASS TEACHERS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>👨‍🏫 Class Teachers</h3>
+                        <p>Assign teachers to classes.</p>
+                        <button onclick="showAddClassTeacherForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Assign Class Teacher</button>
+                        <div id="classTeacherFormContainer" style="margin-top:1rem; display:none;">
+                            <select id="classTeacherClassSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Class</option>
+                            </select>
+                            <select id="classTeacherSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Teacher</option>
+                            </select>
+                            <button onclick="saveClassTeacher()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Assign</button>
+                        </div>
+                        <div id="classTeacherList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- SUBJECT TEACHERS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>📖 Subject Teachers</h3>
+                        <p>Assign teachers to subjects.</p>
+                        <button onclick="showAddSubjectTeacherForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Assign Subject Teacher</button>
+                        <div id="subjectTeacherFormContainer" style="margin-top:1rem; display:none;">
+                            <select id="subjectTeacherClassSelect" onchange="onSubjectTeacherClassChange()" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Class</option>
+                            </select>
+                            <select id="subjectTeacherSubjectSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Subject</option>
+                            </select>
+                            <select id="subjectTeacherSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Teacher</option>
+                            </select>
+                            <button onclick="saveSubjectTeacher()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Assign</button>
+                        </div>
+                        <div id="subjectTeacherList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- LINK PARENT TO CHILD -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center;">
+                        <h3>👨‍👩‍👧‍👦 Link Parent to Child</h3>
+                        <p>Link parents to their children.</p>
+                        <button onclick="showAddParentLinkForm()" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer;">Link Parent</button>
+                        <div id="parentLinkFormContainer" style="margin-top:1rem; display:none;">
+                            <select id="parentSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Parent</option>
+                            </select>
+                            <select id="childSelect" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
+                                <option value="">Select Child</option>
+                            </select>
+                            <button onclick="linkParentToChild()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Link</button>
+                        </div>
+                        <input type="text" id="parentLinkSearchInput" oninput="filterParentLinkList()" placeholder="🔍 Search by student name, admission number, or parent email..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
+                        <div id="parentLinkList" style="margin-top:1rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- DOWNLOAD REPORTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>📥 Download Reports</h3>
+                        <p>Download student results and reports for all students, self-signed-up or added by admin — or narrow it to one class or one student below.</p>
+
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin: 1rem 0;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem;">Term</label><br>
+                                <select id="reportTermSelect" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:200px;">
+                                    <option value="">Loading terms...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem;">Class</label><br>
+                                <select id="reportClassFilter" onchange="populateReportStudentFilter()" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">All Classes</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem;">Student(s)</label><br>
+                                <select id="reportStudentFilter" multiple size="4" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:200px;">
+                                    <option value="">Select a class first, or leave empty for all</option>
+                                </select>
+                                <br><small style="color:#666;">Ctrl/Cmd-click to pick specific students, or leave nothing selected for all</small>
+                            </div>
+                        </div>
+
+                        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:1rem; margin-top:1rem;">
+                            <div>
+                                <button onclick="downloadAllReportCards(
+                                    parseInt(document.getElementById('reportTermSelect').value),
+                                    document.getElementById('reportClassFilter').value || null,
+                                    getSelectedReportStudentIds()
+                                )" class="btn-primary" style="width:100%; border:none; cursor:pointer; padding:0.6rem;">
+                                    📄 Report Cards
+                                </button>
+                            </div>
+                            <div>
+                                <button onclick="downloadAllCumulativeScores(
+                                    parseInt(document.getElementById('reportTermSelect').value),
+                                    document.getElementById('reportClassFilter').value || null,
+                                    getSelectedReportStudentIds()
+                                )" class="btn-primary" style="width:100%; border:none; cursor:pointer; padding:0.6rem;">
+                                    📊 Cumulative Scores
+                                </button>
+                            </div>
+                            <div>
+                                <div style="display:flex; gap:0.5rem; align-items:center; justify-content:center;">
+                                    <input type="number" id="weekNumberInput" value="1" min="1" max="20" style="width:60px; padding:0.4rem; border-radius:6px; border:1px solid #ccc;">
+                                    <button onclick="downloadWeeklyTestSheet(
+                                        parseInt(document.getElementById('weekNumberInput').value),
+                                        parseInt(document.getElementById('reportTermSelect').value),
+                                        document.getElementById('reportClassFilter').value || null,
+                                        getSelectedReportStudentIds()
+                                    )" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 1rem;">
+                                        📋 Weekly Sheet
+                                    </button>
+                                </div>
+                                <small style="color:#666;">Enter week number</small>
+                            </div>
+                        </div>
+                        <div id="downloadStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- BEST GRADUATING STUDENTS (CGPA) -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>🏆 Best Graduating Students</h3>
+                        <p>Ranks students by their average score across every term recorded — useful for identifying the overall best academic performer(s) when a class graduates.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem; align-items:flex-end;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Class (optional)</label>
+                                <select id="cgpaClassFilter" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">All Classes</option>
+                                </select>
+                            </div>
+                            <button onclick="loadBestGraduatingStudents(document.getElementById('cgpaClassFilter').value || null)" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 2rem;">
+                                🏆 Generate Ranking
+                            </button>
+                        </div>
+                        <div id="cgpaResultsContainer" style="margin-top:1.5rem; text-align:left;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- SEND EMAILS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>📧 Send Weekly Results to Parents</h3>
+                        <p>Sends results to parents who are properly linked to a student via "Link Parent to Child" — or narrow it to one class or one student below.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Term</label>
+                                <select id="emailTermSelect" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Loading terms...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Week Number</label>
+                                <input type="number" id="emailWeekNumber" value="1" min="1" max="20" style="width:80px; padding:0.5rem; border-radius:8px; border:1px solid #ccc;">
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Class</label>
+                                <select id="emailClassFilter" onchange="populateEmailStudentFilter()" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">All Classes</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Student</label>
+                                <select id="emailStudentFilter" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:200px;">
+                                    <option value="">All Students in Class</option>
+                                </select>
+                            </div>
+                            <button onclick="sendWeeklyResultsToParents(
+                                parseInt(document.getElementById('emailWeekNumber').value),
+                                parseInt(document.getElementById('emailTermSelect').value),
+                                document.getElementById('emailClassFilter').value || null,
+                                document.getElementById('emailStudentFilter').value || null
+                            )" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 2rem;">
+                                📧 Send Emails
+                            </button>
+                        </div>
+                        <div id="emailStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script>
+        // Photo preview
+        document.getElementById('teacherPhotoFile')?.addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(event) {
+                    document.getElementById('teacherPhotoPreviewImg').src = event.target.result;
+                    document.getElementById('teacherPhotoPreview').style.display = 'block';
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        // Keep the CGPA class filter populated too
+        document.addEventListener('DOMContentLoaded', function() {
+            supabaseClient.from('classes').select('id, name').order('name').then(({ data }) => {
+                const select = document.getElementById('cgpaClassFilter');
+                if (select && data) {
+                    data.forEach(c => {
+                        select.innerHTML += `<option value="${c.id}">${c.name}</option>`;
+                    });
+                }
+            });
+        });
+    </script>
+</body>
+</html>

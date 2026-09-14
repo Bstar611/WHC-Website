@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Login - Wonderhills College</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        /* Password toggle styling */
+        .password-wrapper {
+            position: relative;
+        }
+        .password-wrapper input {
+            padding-right: 40px;
+            width: 100%;
+        }
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: #6b3a2a;
+            padding: 0;
+        }
+        .toggle-password:hover {
+            color: #4a2c1a;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo">
+                <div>
+                <h1><span>Wonderhills</span> College</h1>
+                <div class="motto">"Raising Saintly Scholars"</div>
+            </div>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="about.html">About</a></li>
+                    <li><a href="staff.html">Staff</a></li>
+                    <li><a href="news.html">News</a></li>
+                    <li><a href="contact.html">Contact</a></li>
+                    <li><a href="admission.html">Admission</a></li>
+                    <li><a href="login.html" class="btn-login">Login</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container" style="max-width: 450px; margin: 3rem auto;">
+            <div class="glass-card">
+                <h2 style="text-align:center; color:#4a2c1a;">Welcome Back</h2>
+                <p style="text-align:center; color: #6b3a2a;">Login to your account</p>
+
+                <form id="loginForm" style="margin-top:1.5rem;">
+                    <!-- Email or Admission Number -->
+                    <div style="margin-bottom: 1rem;">
+                        <label for="loginEmail">Email or Admission Number</label>
+                        <input type="text" id="loginEmail" placeholder="you@example.com or WHC26001" required>
+                        <small style="color:#6b3a2a; font-size:0.8rem;">💡 Students can use their Admission Number</small>
+                    </div>
+
+                    <!-- Password with Toggle -->
+                    <div style="margin-bottom: 1rem;">
+                        <label for="loginPassword">Password</label>
+                        <div class="password-wrapper">
+                            <input type="password" id="loginPassword" placeholder="Enter password" required>
+                            <button type="button" class="toggle-password" onclick="togglePassword('loginPassword', this)">👁️</button>
+                        </div>
+                    </div>
+
+                    <!-- Role -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <label for="loginRole">I am a...</label>
+                        <select id="loginRole">
+                            <option value="student">Student</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="parent">Parent</option>
+                            <option value="admin">Administrator</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Login</button>
+                </form>
+
+                <!-- Forgot Password -->
+                <div style="text-align:center; margin-top:0.8rem;">
+                    <a href="#" onclick="showForgotPassword()" style="color:#1a3c5e; font-size:0.9rem;">🔑 Forgot Password?</a>
+                </div>
+
+                <!-- Signup Link -->
+                <p style="margin-top:0.8rem; text-align:center;">
+                    Don't have an account? <a href="signup.html" style="color:#1a3c5e; font-weight:bold;">Sign up here</a>
+                </p>
+
+                <!-- Login Message -->
+                <div id="loginMessage" style="margin-top:1rem; text-align:center; font-weight:bold;"></div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- FORGOT PASSWORD MODAL -->
+        <!-- ============================================================ -->
+        <div id="forgotPasswordModal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); z-index:999; align-items:center; justify-content:center;">
+            <div style="background:white; padding:2rem; border-radius:20px; max-width:400px; margin:auto; box-shadow:0 8px 32px rgba(0,0,0,0.3);">
+                <h3 style="color:#4a2c1a; text-align:center;">🔑 Reset Password</h3>
+                <p style="font-size:0.9rem; color:#666; text-align:center;">Enter your email address and we'll send you a link to reset your password.</p>
+                <form id="forgotPasswordForm" style="margin-top:1rem;">
+                    <div style="margin-bottom:1rem;">
+                        <label for="resetEmail">Email Address</label>
+                        <input type="email" id="resetEmail" placeholder="you@example.com" required style="width:100%; padding:0.8rem; border:1px solid #ccc; border-radius:6px;">
+                    </div>
+                    <button type="submit" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Send Reset Link</button>
+                    <div id="resetMessage" style="margin-top:0.8rem; text-align:center; font-weight:bold;"></div>
+                </form>
+                <button onclick="closeForgotPassword()" style="margin-top:1rem; width:100%; padding:0.8rem; background:#eee; border:none; border-radius:6px; cursor:pointer;">Cancel</button>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script>
+        // Show Forgot Password Modal
+        function showForgotPassword() {
+            document.getElementById('forgotPasswordModal').style.display = 'flex';
+        }
+
+        // Close Forgot Password Modal
+        function closeForgotPassword() {
+            document.getElementById('forgotPasswordModal').style.display = 'none';
+            document.getElementById('resetMessage').textContent = '';
+            document.getElementById('resetEmail').value = '';
+        }
+
+        // Close modal when clicking outside
+        document.getElementById('forgotPasswordModal')?.addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeForgotPassword();
+            }
+        });
+
+        // Toggle Password Visibility
+        function togglePassword(inputId, button) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                button.textContent = '🙈'; // closed eye
+            } else {
+                input.type = 'password';
+                button.textContent = '👁️'; // open eye
+            }
+        }
+    </script>
+</body>
+</html>

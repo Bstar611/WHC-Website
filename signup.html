@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign Up - Wonderhills College</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        .password-wrapper {
+            position: relative;
+        }
+        .password-wrapper input {
+            padding-right: 40px;
+            width: 100%;
+        }
+        .toggle-password {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 1.2rem;
+            color: #6b3a2a;
+            padding: 0;
+        }
+        .toggle-password:hover {
+            color: #4a2c1a;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo">
+                <div>
+                <h1><span>Wonderhills</span> College</h1>
+                <div class="motto">"Raising Saintly Scholars"</div>
+            </div>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="about.html">About</a></li>
+                    <li><a href="staff.html">Staff</a></li>
+                    <li><a href="news.html">News</a></li>
+                    <li><a href="contact.html">Contact</a></li>
+                    <li><a href="admission.html">Admission</a></li>
+                    <li><a href="login.html" class="btn-login">Login</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <div class="container" style="max-width: 450px; margin: 3rem auto;">
+            <div class="glass-card">
+                <h2 style="text-align:center; color:#4a2c1a;">Create Account</h2>
+                <p style="text-align:center; color: #6b3a2a;">Join the Wonderhills family</p>
+
+                <form id="signupForm" style="margin-top:1.5rem;">
+                    <!-- Full Name -->
+                    <div style="margin-bottom: 1rem;">
+                        <label for="fullName">Full Name</label>
+                        <input type="text" id="fullName" placeholder="e.g. John Doe" required>
+                    </div>
+
+                    <!-- Email -->
+                    <div style="margin-bottom: 1rem;">
+                        <label for="signupEmail">Email Address</label>
+                        <input type="email" id="signupEmail" placeholder="you@example.com" required>
+                    </div>
+
+                    <!-- Password with Toggle -->
+                    <div style="margin-bottom: 1rem;">
+                        <label for="signupPassword">Password</label>
+                        <div class="password-wrapper">
+                            <input type="password" id="signupPassword" placeholder="Min 6 characters" required>
+                            <button type="button" class="toggle-password" onclick="togglePassword('signupPassword', this)">👁️</button>
+                        </div>
+                    </div>
+
+                    <!-- Role -->
+                    <div style="margin-bottom: 1.5rem;">
+                        <label for="signupRole">I am a...</label>
+                        <select id="signupRole">
+                            <option value="student">Student</option>
+                            <option value="teacher">Teacher</option>
+                            <option value="parent">Parent</option>
+                        </select>
+                        <small id="teacherRoleNote" style="color:#6b3a2a; font-size:0.8rem; display:none;">💡 Only works if the school has already added you as staff using this exact email — otherwise contact the school office first.</small>
+                    </div>
+
+                    <!-- Class (Only for Students) -->
+                    <div id="studentClassField" style="margin-bottom: 1.5rem; display:none;">
+                        <label for="signupClass">Class</label>
+                        <select id="signupClass">
+                            <option value="JSS1">JSS1</option>
+                            <option value="JSS2">JSS2</option>
+                            <option value="JSS3">JSS3</option>
+                            <option value="SS1">SS1</option>
+                            <option value="SS2">SS2</option>
+                            <option value="SS3">SS3</option>
+                        </select>
+                    </div>
+
+                    <button type="submit" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Sign Up</button>
+                </form>
+
+                <p style="margin-top:1rem; text-align:center;">
+                    Already have an account? <a href="login.html" style="color:#1a3c5e; font-weight:bold;">Login here</a>
+                </p>
+                <div id="signupMessage" style="margin-top:1rem; text-align:center; font-weight:bold;"></div>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+    <script>
+        // Show/Hide Class Field based on role
+        document.addEventListener('DOMContentLoaded', function() {
+            const roleSelect = document.getElementById('signupRole');
+            const classField = document.getElementById('studentClassField');
+
+            roleSelect.addEventListener('change', function() {
+                if (this.value === 'student') {
+                    classField.style.display = 'block';
+                } else {
+                    classField.style.display = 'none';
+                }
+                document.getElementById('teacherRoleNote').style.display = this.value === 'teacher' ? 'block' : 'none';
+            });
+
+            // Check initial state
+            if (roleSelect.value === 'student') {
+                classField.style.display = 'block';
+            }
+        });
+
+        // Toggle Password Visibility
+        function togglePassword(inputId, button) {
+            const input = document.getElementById(inputId);
+            if (input.type === 'password') {
+                input.type = 'text';
+                button.textContent = '🙈';
+            } else {
+                input.type = 'password';
+                button.textContent = '👁️';
+            }
+        }
+    </script>
+</body>
+</html>

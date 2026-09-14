@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Parent Dashboard - Wonderhills</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo"><img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="#" id="logoutBtn" onclick="handleLogout(); return false;" class="btn-login" style="background:#b91c1c;">Logout</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 3rem 0;">
+            <div class="container">
+                <h2 style="color:#4a2c1a;">👨‍👩‍👧‍👦 Parent Dashboard</h2>
+                <div id="userInfo"></div>
+
+                <!-- Children List -->
+                <div id="childrenContainer" style="margin-top: 2rem;">
+                    <p>Loading your children...</p>
+                </div>
+
+                <!-- Child AI Analytics -->
+                <div id="childAIAnalyticsContainer" style="margin-top: 2rem;"></div>
+
+                <!-- Child Report Card / Attendance (shown on demand) -->
+                <div id="childReportCardContainer" style="margin-top: 2rem;"></div>
+
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>

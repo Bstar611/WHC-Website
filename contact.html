@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Contact - Wonderhills College</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+</head>
+<body>
+    <header>
+        <div class="container">
+            <div class="logo">
+                <img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo">
+                <div>
+                <h1><span>Wonderhills</span> College</h1>
+                <div class="motto">"Raising Saintly Scholars"</div>
+            </div>
+            </div>
+            <nav>
+                <ul>
+                    <li><a href="index.html">Home</a></li>
+                    <li><a href="about.html">About</a></li>
+                    <li><a href="staff.html">Staff</a></li>
+                    <li><a href="news.html">News</a></li>
+                    <li><a href="contact.html">Contact</a></li>
+                    <li><a href="admission.html">Admission</a></li>
+                    <li><a href="login.html" class="btn-login">Login</a></li>
+                </ul>
+            </nav>
+        </div>
+    </header>
+
+    <main>
+        <section style="padding: 4rem 0;">
+            <div class="container" style="max-width: 700px; margin: 0 auto;">
+                <h2 style="text-align:center; color:#4a2c1a;">Get in Touch</h2>
+                <p style="text-align:center;">We would love to hear from you. Reach out to us today.</p>
+
+                <div style="margin: 2rem 0; display: flex; gap: 2rem; flex-wrap: wrap; justify-content:center;">
+                    <div><strong>📞 Phone:</strong> +234 907 676 0423</div>
+                    <div><strong>📧 Email:</strong> wonderhills.sch@gmail.com</div>
+                    <div><strong>📍 Address:</strong> 6, Aliu Owoyele Street, Lagos, Nigeria.</div>
+                </div>
+
+                <form id="contactForm">
+                    <div style="margin-bottom: 1rem;">
+                        <label for="contactName">Full Name</label>
+                        <input type="text" id="contactName" placeholder="Your name" required>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="contactEmail">Email Address</label>
+                        <input type="email" id="contactEmail" placeholder="you@example.com" required>
+                    </div>
+                    <div style="margin-bottom: 1rem;">
+                        <label for="contactMessage">Message</label>
+                        <textarea id="contactMessage" rows="5" placeholder="How can we assist you?" required></textarea>
+                    </div>
+                    <button type="submit" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Send Message</button>
+                    <div id="contactMessageStatus" style="margin-top:1rem; text-align:center; font-weight:bold;"></div>
+                </form>
+            </div>
+        </section>
+    </main>
+
+    <footer>
+        <div class="container">
+            <p>&copy; 2026 Wonderhills College. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <script src="js/main.js"></script>
+</body>
+</html>
