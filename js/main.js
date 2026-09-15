@@ -843,10 +843,10 @@ async function viewStudentRisk(studentId) {
             <hr style="border: 1px solid #d4a373; margin: 1rem 0;">
 
             <h4>📊 Factor Breakdown</h4>
-            ${renderFactorBar('Academic Performance', riskData.details.academic, '#1a3c5e')}
-            ${renderFactorBar('Attendance', riskData.details.attendance, '#4a90d9')}
-            ${renderFactorBar('Assignments', riskData.details.assignments, '#d4a373')}
-            ${renderFactorBar('Character', riskData.details.character, '#2d1a0e')}
+            ${renderFactorBar('Academic Performance (40%)', riskData.details.academic, '#1a3c5e')}
+            ${renderFactorBar('Attendance (25%)', riskData.details.attendance, '#4a90d9')}
+            ${renderFactorBar('Assignments (15%)', riskData.details.assignments, '#d4a373')}
+            ${renderFactorBar('Character (20%)', riskData.details.character, '#2d1a0e')}
 
             <hr style="border: 1px solid #d4a373; margin: 1rem 0;">
 
@@ -2184,7 +2184,7 @@ let selectedYearIdForTerm = null;
 // empty this whole time, regardless of what you selected.
 async function populateReportFilterClasses() {
     const { data: classes } = await supabaseClient.from('classes').select('id, name').order('name');
-    ['reportClassFilter', 'emailClassFilter'].forEach(id => {
+    ['reportClassFilter', 'emailClassFilter', 'studentEmailClassFilter'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
         select.innerHTML = '<option value="">All Classes</option>' +
@@ -2238,9 +2238,29 @@ async function populateEmailStudentFilter() {
         (students || []).map(s => `<option value="${s.id}">${s.full_name} (${s.admission_number})</option>`).join('');
 }
 
+async function populateStudentEmailStudentFilter() {
+    const classId = document.getElementById('studentEmailClassFilter').value;
+    const select = document.getElementById('studentEmailStudentFilter');
+    if (!select) return;
+
+    if (!classId) {
+        select.innerHTML = '<option value="">All Students in Class</option>';
+        return;
+    }
+
+    const { data: students } = await supabaseClient
+        .from('students')
+        .select('id, full_name, admission_number')
+        .eq('class_id', classId)
+        .order('full_name');
+
+    select.innerHTML = '<option value="">All Students in Class</option>' +
+        (students || []).map(s => `<option value="${s.id}">${s.full_name} (${s.admission_number})</option>`).join('');
+}
+
 function populateTermDropdowns(terms) {
     const activeTerm = terms.find(t => t.is_active) || terms[0];
-    ['reportTermSelect', 'emailTermSelect'].forEach(selectId => {
+    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect'].forEach(selectId => {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = terms.map(t =>
@@ -5672,6 +5692,210 @@ async function sendWeeklyResultsToParents(weekNumber, termId, classId, studentId
         } catch (e) {
             // Includes a 15-second timeout — a single unresponsive email
             // send can no longer freeze the whole batch indefinitely.
+            errorCount++;
+        }
+    }
+
+    statusEl.textContent = `✅ ${sentCount} emails sent! ❌ ${errorCount} failed.`;
+    statusEl.style.color = sentCount > 0 ? '#166534' : '#b91c1c';
+}
+
+// ============================================================
+// SEND RESULTS DIRECTLY TO STUDENTS (mirrors the parent version,
+// but sends straight to the student's own email — no parent link
+// required, since not every student necessarily has a linked parent).
+// ============================================================
+async function sendWeeklyResultsToStudents(weekNumber, termId, classId, studentIds) {
+    const statusEl = document.getElementById('studentEmailStatus');
+    if (!statusEl) {
+        alert('Email status element not found.');
+        return;
+    }
+
+    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.style.color = '#1a3c5e';
+
+    const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
+
+    let studentQuery = supabaseClient
+        .from('students')
+        .select('id, full_name, email, class_id')
+        .not('email', 'is', null);
+    if (studentIds && studentIds.length > 0) studentQuery = studentQuery.in('id', studentIds);
+    else if (classId) studentQuery = studentQuery.eq('class_id', classId);
+
+    const { data: students, error } = await studentQuery;
+
+    if (error) {
+        statusEl.textContent = '❌ Error: ' + error.message;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    if (!students || students.length === 0) {
+        statusEl.textContent = '⚠️ No students with an email found for that selection.';
+        statusEl.style.color = '#d79b00';
+        return;
+    }
+
+    let sentCount = 0;
+    let errorCount = 0;
+    let processed = 0;
+
+    for (const student of students) {
+        processed++;
+        statusEl.textContent = `⏳ Sending email ${processed} of ${students.length}...`;
+
+        const { data: scores } = await supabaseClient
+            .from('weekly_test_results')
+            .select('score, subjects(name)')
+            .eq('student_id', student.id)
+            .eq('week_number', weekNumber)
+            .eq('term_id', termId);
+
+        if (!scores || scores.length === 0) continue;
+
+        const total = scores.reduce((sum, s) => sum + s.score, 0);
+        const average = total / scores.length;
+
+        const subject = `📊 Your Weekly Test Results - Week ${weekNumber}`;
+        const html = `
+            <h2>Wonderhills College</h2>
+            <h3>Weekly Test Results</h3>
+            <p><strong>Student:</strong> ${student.full_name}</p>
+            <p><strong>Week:</strong> ${weekNumber}</p>
+            <table border="1" cellpadding="8" style="border-collapse:collapse; width:100%;">
+                <tr><th style="background:#4a2c1a; color:white;">Subject</th><th style="background:#4a2c1a; color:white;">Score</th></tr>
+                ${scores.map(s => `<tr><td>${s.subjects?.name || 'Unknown'}</td><td>${s.score}/100</td></tr>`).join('')}
+                <tr><td><strong>Average</strong></td><td><strong>${Math.round(average)}%</strong></td></tr>
+            </table>
+            <p>${average >= 70 ? '✅ Good performance! Keep it up!' : average >= 50 ? '⚠️ Average performance — you can do better.' : '❌ Below average. Please see a teacher for help.'}</p>
+            <p>© 2026 Wonderhills College</p>
+        `;
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const response = await fetch(EDGE_FUNCTION_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({ to: student.email, subject: subject, html: html }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (response.ok) sentCount++;
+            else errorCount++;
+        } catch (e) {
+            errorCount++;
+        }
+    }
+
+    statusEl.textContent = `✅ ${sentCount} emails sent! ❌ ${errorCount} failed.`;
+    statusEl.style.color = sentCount > 0 ? '#166534' : '#b91c1c';
+}
+
+async function sendCumulativeResultsToStudents(termId, classId, studentIds) {
+    const statusEl = document.getElementById('studentEmailStatus');
+    if (!statusEl) {
+        alert('Email status element not found.');
+        return;
+    }
+
+    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.style.color = '#1a3c5e';
+
+    const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
+
+    const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
+    const termName = termRow?.name || `Term ${termId}`;
+
+    let studentQuery = supabaseClient
+        .from('students')
+        .select('id, full_name, email, class_id')
+        .not('email', 'is', null);
+    if (studentIds && studentIds.length > 0) studentQuery = studentQuery.in('id', studentIds);
+    else if (classId) studentQuery = studentQuery.eq('class_id', classId);
+
+    const { data: students, error } = await studentQuery;
+
+    if (error) {
+        statusEl.textContent = '❌ Error: ' + error.message;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    if (!students || students.length === 0) {
+        statusEl.textContent = '⚠️ No students with an email found for that selection.';
+        statusEl.style.color = '#d79b00';
+        return;
+    }
+
+    let sentCount = 0;
+    let errorCount = 0;
+    let processed = 0;
+
+    for (const student of students) {
+        processed++;
+        statusEl.textContent = `⏳ Sending email ${processed} of ${students.length}...`;
+
+        const { data: weeklyScores } = await supabaseClient
+            .from('weekly_test_results')
+            .select('subject_id, score, subjects(name)')
+            .eq('student_id', student.id)
+            .eq('term_id', termId);
+
+        if (!weeklyScores || weeklyScores.length === 0) continue;
+
+        const subjectScores = {};
+        weeklyScores.forEach(w => {
+            const name = w.subjects?.name || 'Unknown';
+            if (!subjectScores[name]) subjectScores[name] = [];
+            subjectScores[name].push(w.score);
+        });
+
+        const subjectCAs = Object.entries(subjectScores).map(([name, scores]) => ({
+            name,
+            ca: calculateCA(scores)
+        }));
+        const overallCA = Math.round(subjectCAs.reduce((sum, s) => sum + s.ca, 0) / subjectCAs.length);
+
+        const subject = `📊 Your Cumulative Scores - ${termName}`;
+        const html = `
+            <h2>Wonderhills College</h2>
+            <h3>Cumulative Test Scores</h3>
+            <p><strong>Student:</strong> ${student.full_name}</p>
+            <p><strong>Term:</strong> ${termName}</p>
+            <table border="1" cellpadding="8" style="border-collapse:collapse; width:100%;">
+                <tr><th style="background:#4a2c1a; color:white;">Subject</th><th style="background:#4a2c1a; color:white;">CA (out of 25)</th></tr>
+                ${subjectCAs.map(s => `<tr><td>${s.name}</td><td>${s.ca}</td></tr>`).join('')}
+                <tr><td><strong>Overall CA</strong></td><td><strong>${overallCA}/25</strong></td></tr>
+            </table>
+            <p>© 2026 Wonderhills College</p>
+        `;
+
+        try {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+            const response = await fetch(EDGE_FUNCTION_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+                },
+                body: JSON.stringify({ to: student.email, subject: subject, html: html }),
+                signal: controller.signal
+            });
+            clearTimeout(timeoutId);
+
+            if (response.ok) sentCount++;
+            else errorCount++;
+        } catch (e) {
             errorCount++;
         }
     }
