@@ -468,6 +468,57 @@
                         <div id="emailStatus" style="margin-top:1rem; font-weight:bold;"></div>
                     </div>
 
+                    <!-- ============================================================ -->
+                    <!-- SEND RESULTS DIRECTLY TO STUDENTS -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>📧 Send Results to Students</h3>
+                        <p>Sends straight to the student's own email — no parent link required. Works for any student with an email on file.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Term</label>
+                                <select id="studentEmailTermSelect" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Loading terms...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Week Number</label>
+                                <input type="number" id="studentEmailWeekNumber" value="1" min="1" max="20" style="width:80px; padding:0.5rem; border-radius:8px; border:1px solid #ccc;">
+                                <small style="display:block; color:#666;">(only used for Weekly Results)</small>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Class</label>
+                                <select id="studentEmailClassFilter" onchange="populateStudentEmailStudentFilter()" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">All Classes</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Student</label>
+                                <select id="studentEmailStudentFilter" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:200px;">
+                                    <option value="">All Students in Class</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div style="margin-top:1rem; display:flex; gap:1rem; justify-content:center; flex-wrap:wrap;">
+                            <button onclick="sendWeeklyResultsToStudents(
+                                parseInt(document.getElementById('studentEmailWeekNumber').value),
+                                parseInt(document.getElementById('studentEmailTermSelect').value),
+                                document.getElementById('studentEmailClassFilter').value || null,
+                                document.getElementById('studentEmailStudentFilter').value ? [parseInt(document.getElementById('studentEmailStudentFilter').value)] : null
+                            )" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 1.5rem;">
+                                📧 Send Weekly Results
+                            </button>
+                            <button onclick="sendCumulativeResultsToStudents(
+                                parseInt(document.getElementById('studentEmailTermSelect').value),
+                                document.getElementById('studentEmailClassFilter').value || null,
+                                document.getElementById('studentEmailStudentFilter').value ? [parseInt(document.getElementById('studentEmailStudentFilter').value)] : null
+                            )" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 1.5rem;">
+                                📊 Send Cumulative Results
+                            </button>
+                        </div>
+                        <div id="studentEmailStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+
                 </div>
             </div>
         </section>
