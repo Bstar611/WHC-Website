@@ -1013,39 +1013,28 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (claimError) console.error('Student claim error:', claimError);
                     admissionNumber = unclaimedStudent.admission_number;
                 } else if (classSelected) {
-                    const year = new Date().getFullYear().toString().slice(2);
-                    const { data: lastStudent } = await supabaseClient
-                        .from('students')
-                        .select('admission_number')
-                        .like('admission_number', `WHC${year}%`)
-                        .order('admission_number', { ascending: false })
-                        .limit(1);
-
-                    let sequence = 1;
-                    if (lastStudent && lastStudent.length > 0) {
-                        const lastNum = parseInt(lastStudent[0].admission_number.slice(-3));
-                        sequence = lastNum + 1;
-                    }
-                    admissionNumber = `WHC${year}${String(sequence).padStart(3, '0')}`;
-
                     const { data: classData } = await supabaseClient
                         .from('classes')
                         .select('id')
                         .eq('name', classSelected)
                         .single();
 
-                    const { error: studentError } = await supabaseClient
+                    // Admission number assigned by the database (migration 18),
+                    // so simultaneous signups can't collide on the same number.
+                    const { data: insertedStudent, error: studentError } = await supabaseClient
                         .from('students')
                         .insert([{
                             full_name: fullName,
                             class_id: classData?.id || null,
-                            admission_number: admissionNumber,
                             user_id: data.user.id,
                             entry_point: classSelected,
                             email: email
-                        }]);
+                        }])
+                        .select('admission_number')
+                        .maybeSingle();
 
                     if (studentError) console.error('Student insert error:', studentError);
+                    admissionNumber = insertedStudent?.admission_number || null;
                 }
             } else if (role === 'teacher') {
                 // Teacher access is only ever granted by claiming a staff
@@ -1857,39 +1846,27 @@ async function saveStudent() {
         return;
     }
 
-    const year = new Date().getFullYear().toString().slice(2);
-    const { data: lastStudent } = await supabaseClient
-        .from('students')
-        .select('admission_number')
-        .like('admission_number', `WHC${year}%`)
-        .order('admission_number', { ascending: false })
-        .limit(1);
-
-    let nextNumber = 1;
-    if (lastStudent && lastStudent.length > 0) {
-        nextNumber = parseInt(lastStudent[0].admission_number.slice(-3)) + 1;
-    }
-
-    const admissionNumber = `WHC${year}${String(nextNumber).padStart(3, '0')}`;
-
-    // No login account required up front. This creates the student's record
-    // right away with an admission number; if you gave them an email, it'll
-    // automatically link to their account the moment they (or their parent)
-    // sign up using that same email — see the signup flow for that logic.
-    const { error } = await supabaseClient
+    // Admission number is assigned by the database itself (see migration 18),
+    // which guarantees two students created at the same moment can never
+    // receive the same number — that race was the cause of the intermittent
+    // admission number failures.
+    const { data: inserted, error } = await supabaseClient
         .from('students')
         .insert([{
             full_name: fullName,
             class_id: classId,
-            admission_number: admissionNumber,
             user_id: null,
             email: email || null
-        }]);
+        }])
+        .select('admission_number')
+        .maybeSingle();
 
     if (error) {
         alert('Error saving student: ' + error.message);
         return;
     }
+
+    const admissionNumber = inserted?.admission_number || '(assigned)';
 
     alert(`✅ Student saved! Admission Number: ${admissionNumber}${email ? '\n\nThey can now sign up using ' + email + ' and it will automatically link to this record.' : '\n\nNo email was given — add one later if you want their account to auto-link when they sign up.'}`);
     document.getElementById('studentName').value = '';
