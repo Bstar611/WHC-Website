@@ -552,6 +552,47 @@ footer p {
     .dash-grid {
         grid-template-columns: 1fr 1fr;
     }
+
+    /* ---- Dashboard responsiveness ----
+       Several admin cards are set to span 2 grid columns via inline
+       styles, which would force a 2-column layout even on a narrow
+       phone. !important is needed here specifically because inline
+       styles otherwise win over stylesheet rules. */
+    [style*="grid-column: span 2"] {
+        grid-column: span 1 !important;
+    }
+
+    /* Any table inside a card scrolls sideways instead of breaking
+       the whole page layout on small screens. */
+    .glass-card table {
+        display: block;
+        overflow-x: auto;
+        white-space: nowrap;
+    }
+
+    /* Filter/button rows stack vertically and fill the width rather
+       than squeezing into an unusable row. */
+    .glass-card select,
+    .glass-card input[type="text"],
+    .glass-card input[type="email"],
+    .glass-card input[type="number"],
+    .glass-card input[type="date"],
+    .glass-card input[type="time"] {
+        width: 100% !important;
+        min-width: 0 !important;
+        box-sizing: border-box;
+    }
+
+    .glass-card button {
+        width: 100%;
+        margin-top: 0.4rem;
+    }
+
+    /* The admin overview stat cards go two-per-row instead of
+       shrinking into an unreadable single line. */
+    #adminOverviewStats > div {
+        flex: 1 1 calc(50% - 0.5rem) !important;
+    }
 }
 
 @media (max-width: 480px) {
@@ -574,5 +615,19 @@ footer p {
     .btn-primary {
         padding: 0.7rem 1.8rem;
         font-size: 0.9rem;
+    }
+
+    header .logo img.site-logo {
+        height: 42px;
+    }
+
+    header .logo h1 {
+        font-size: 1.3rem;
+    }
+
+    /* Collapsible class/subject groupings need breathing room on
+       the smallest screens. */
+    details {
+        padding: 0.5rem !important;
     }
 }
