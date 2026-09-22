@@ -3074,7 +3074,11 @@ async function loadStudentsForSubject(subjectId, classId) {
             .eq('term_id', currentTermId)
             .maybeSingle();
 
-        const score = existing?.score || '';
+        // Using ?? (not ||) here matters: a genuine score of 0 is falsy in
+        // JS, so `existing?.score || ''` would wrongly show a blank field
+        // for a real 0 score, making a teacher think nothing was saved.
+        // ?? only falls back to '' when the value is actually null/undefined.
+        const score = existing?.score ?? '';
 
         html += `
             <tr>
@@ -3289,7 +3293,7 @@ async function loadClassStudents(classId) {
 
         for (const subject of subjects) {
             const existing = existingScores?.find(e => e.student_id === student.id && e.subject_id === subject.id);
-            const val = existing?.exam_score || '';
+            const val = existing?.exam_score ?? '';
             html += `
                 <td style="padding:8px;">
                     <input type="number" min="0" max="75" value="${val}" 
@@ -5777,6 +5781,45 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
         `;
     }
 
+    // ------------------------------------------------------------
+    // TOP 5 PAGES - one dedicated page each for JSS and SSS, showing
+    // ONLY the overall top 5 (the students who earned the M1-B5 / R1-Z5
+    // labels), pulled out on their own instead of being buried inside
+    // each class's table. Straightforward querying: just the students
+    // whose groupPosition is 1 through 5, sorted by that position.
+    // ------------------------------------------------------------
+    function renderTop5Page(list, sectionTitle, sectionKey) {
+        const top5 = list.filter(s => s.groupPosition <= 5).sort((a, b) => a.groupPosition - b.groupPosition);
+        if (top5.length === 0) return '';
+
+        return `
+            <div style="page-break-after:always;">
+                <h3 style="color:#4a2c1a; text-align:center;">🏆 Top 5 - ${sectionTitle}</h3>
+                <p style="font-size:0.85rem; color:#666; text-align:center;">The overall best ${top5.length} across every ${sectionTitle} class combined.</p>
+                <table style="width:100%; border-collapse:collapse; max-width:700px; margin:1rem auto;">
+                    <thead>
+                        <tr style="background:#4a2c1a; color:white;">
+                            <th style="padding:10px;">Rank</th>
+                            <th style="padding:10px;">Student</th>
+                            <th style="padding:10px;">Class</th>
+                            <th style="padding:10px;">Percentage</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${top5.map(s => `
+                            <tr style="border-bottom:1px solid #ddd;">
+                                <td style="padding:10px; font-weight:bold; font-size:1.1rem;">${getWeeklyGroupLabel(s.groupPosition, sectionKey)}</td>
+                                <td style="padding:10px;"><strong>${s.name}</strong></td>
+                                <td style="padding:10px;">${s.className}</td>
+                                <td style="padding:10px; font-weight:bold;">${s.percentage}%</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </div>
+        `;
+    }
+
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
         <html>
@@ -5797,6 +5840,8 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
             <hr>
             ${renderJuniorClassByClass(junior)}
             ${renderSeniorClassByClass(senior)}
+            ${renderTop5Page(junior, 'Junior Secondary School', 'Junior')}
+            ${renderTop5Page(senior, 'Senior Secondary School', 'Senior')}
             <p style="text-align:center; margin-top:20px;">© 2026 Wonderhills College</p>
             <div class="no-print" style="text-align:center; margin-top:20px;">
                 <button onclick="window.print()" style="padding:10px 30px; background:#1a3c5e; color:white; border:none; border-radius:6px; cursor:pointer;">Print / Save as PDF</button>
