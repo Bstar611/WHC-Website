@@ -3051,7 +3051,7 @@ async function loadStudentsForSubject(subjectId, classId) {
             </select>
             <small style="color:#666;">(only weeks admin approved for this subject show here)</small>
         </div>
-        <p><small>Weekly Tests (Max 100 marks)</small></p>
+        <p><small>Weekly Tests (Max 100 marks). Enter all scores below, then click "Save All Scores" once at the bottom \u2014 no need to save each student individually.</small></p>
         <div style="overflow-x:auto;">
         <table>
             <thead>
@@ -3059,7 +3059,6 @@ async function loadStudentsForSubject(subjectId, classId) {
                     <th style="padding:8px;">Student</th>
                     <th style="padding:8px;">Admission</th>
                     <th style="padding:8px;">Score (100)</th>
-                    <th style="padding:8px;">Action</th>
                 </tr>
             </thead>
             <tbody>
@@ -3086,12 +3085,6 @@ async function loadStudentsForSubject(subjectId, classId) {
                            style="width:80px; padding:4px;" 
                            id="score_${student.id}" />
                 </td>
-                <td style="padding:8px;">
-                    <button onclick="saveWeeklyScore(${student.id}, ${subjectId})" 
-                            class="btn-primary" style="padding:2px 12px; font-size:0.8rem; border:none; cursor:pointer;">
-                        💾 Save
-                    </button>
-                </td>
             </tr>
         `;
     }
@@ -3099,6 +3092,10 @@ async function loadStudentsForSubject(subjectId, classId) {
     html += `
             </tbody>
         </table>
+        <button onclick="saveAllWeeklyScores(${subjectId})" 
+                class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer; padding:0.7rem 2rem; font-size:1rem;">
+            💾 Save All Scores
+        </button>
         <div id="saveStatus" style="margin-top:1rem; font-weight:bold;"></div>
         </div>
     `;
@@ -3112,35 +3109,82 @@ function onWeeklyScoreWeekChange(subjectId, classId) {
     loadStudentsForSubject(subjectId, classId);
 }
 
-async function saveWeeklyScore(studentId, subjectId) {
+// ============================================================
+// Saves every score currently entered on the page in ONE batch,
+// instead of the teacher clicking Save per student. Reads every
+// input whose id starts with "score_" (regardless of which student
+// row it belongs to), validates them all up front, and only then
+// sends a single upsert covering the whole class at once.
+//
+// Blank inputs are skipped entirely (a teacher who hasn't gotten to
+// a particular student yet won't accidentally overwrite an existing
+// score with 0 or a blank). Invalid entries (non-numbers, out of
+// 0-100 range) are flagged in red and stop the save so nothing
+// partial goes through silently.
+// ============================================================
+async function saveAllWeeklyScores(subjectId) {
     const statusEl = document.getElementById('saveStatus');
-    const input = document.getElementById(`score_${studentId}`);
-    const score = parseInt(input.value);
+    statusEl.textContent = '⏳ Saving all scores...';
+    statusEl.style.color = '#1a3c5e';
 
-    if (isNaN(score) || score < 0 || score > 100) {
-        statusEl.textContent = '❌ Please enter a valid score (0-100).';
-        statusEl.style.color = '#b91c1c';
+    const inputs = document.querySelectorAll('input[id^="score_"]');
+
+    if (inputs.length === 0) {
+        statusEl.textContent = '⚠️ No students found to save.';
+        statusEl.style.color = '#d79b00';
         return;
     }
 
-    statusEl.textContent = '⏳ Saving...';
-    statusEl.style.color = '#1a3c5e';
+    const rowsToSave = [];
+    let invalidCount = 0;
 
-    const { error } = await supabaseClient
-        .from('weekly_test_results')
-        .upsert({
+    inputs.forEach(input => {
+        input.style.border = ''; // clear any previous error highlight
+        const rawValue = input.value.trim();
+
+        // Skip blanks entirely - don't save a 0 for a student the
+        // teacher simply hasn't entered a score for yet.
+        if (rawValue === '') return;
+
+        const studentId = parseInt(input.id.replace('score_', ''));
+        const score = parseInt(rawValue);
+
+        if (isNaN(score) || score < 0 || score > 100) {
+            invalidCount++;
+            input.style.border = '2px solid #b91c1c';
+            return;
+        }
+
+        rowsToSave.push({
             student_id: studentId,
             subject_id: subjectId,
             week_number: currentWeekNumber,
             term_id: currentTermId,
             score: score
-        }, { onConflict: 'student_id, subject_id, week_number, term_id' });
+        });
+    });
+
+    if (invalidCount > 0) {
+        statusEl.textContent = `❌ ${invalidCount} score(s) are invalid (must be 0-100). Fields outlined in red need fixing before saving.`;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    if (rowsToSave.length === 0) {
+        statusEl.textContent = '⚠️ No scores entered yet - fill in at least one before saving.';
+        statusEl.style.color = '#d79b00';
+        return;
+    }
+
+    const { error } = await supabaseClient
+        .from('weekly_test_results')
+        .upsert(rowsToSave, { onConflict: 'student_id, subject_id, week_number, term_id' });
 
     if (error) {
         statusEl.textContent = '❌ Error: ' + error.message;
         statusEl.style.color = '#b91c1c';
     } else {
-        statusEl.textContent = '✅ Score saved successfully!';
+        statusEl.textContent = `✅ ${rowsToSave.length} score(s) saved successfully!`;
         statusEl.style.color = '#166534';
     }
 }
@@ -4036,6 +4080,14 @@ async function loadStudentReport() {
     `;
 }
 
+// ============================================================
+// UPDATED: loadStudentWeeklyAverages() — now shows a "Pending"
+// state for weeks that are scheduled but not yet published,
+// instead of those weeks just silently disappearing. Relies on
+// weekly_results_publish + RLS on weekly_test_results to actually
+// enforce the gate (this is UI polish on top of that enforcement,
+// not the enforcement itself).
+// ============================================================
 async function loadStudentWeeklyAverages() {
     const container = document.getElementById('weeklyAveragesContainer');
     if (!container) return;
@@ -4043,7 +4095,7 @@ async function loadStudentWeeklyAverages() {
     const { data: { user } } = await supabaseClient.auth.getUser();
     const { data: studentData } = await supabaseClient
         .from('students')
-        .select('id')
+        .select('id, class_id')
         .eq('user_id', user.id)
         .maybeSingle();
 
@@ -4059,40 +4111,71 @@ async function loadStudentWeeklyAverages() {
         .limit(1);
     const termId = termData?.[0]?.id || 1;
 
-    // Since teachers can only ever enter a score for an admin-approved
-    // subject/week, every row here is already guaranteed to belong to a
-    // genuinely scheduled test — no extra filtering needed to get an
-    // accurate "average of subjects actually tested that week".
+    // Published scores this student can actually see (RLS enforces this
+    // regardless, but we still request only what we expect to get back).
     const { data: scores } = await supabaseClient
         .from('weekly_test_results')
         .select('week_number, score')
         .eq('student_id', studentData.id)
         .eq('term_id', termId);
 
-    if (!scores || scores.length === 0) {
-        container.innerHTML = '<p>No weekly scores recorded yet this term.</p>';
-        return;
-    }
+    // All weeks that have EVER been scheduled for this student's class,
+    // so we know which weeks to show as "Pending" vs which don't exist yet.
+    const { data: scheduledWeeks } = await supabaseClient
+        .from('weekly_test_schedule')
+        .select('week_number')
+        .eq('term_id', termId)
+        .eq('class_id', studentData.class_id);
+
+    // Publish status for every week scheduled for this class
+    const { data: publishRows } = await supabaseClient
+        .from('weekly_results_publish')
+        .select('week_number, published')
+        .eq('term_id', termId)
+        .eq('class_id', studentData.class_id);
+
+    const publishMap = {};
+    (publishRows || []).forEach(p => { publishMap[p.week_number] = p.published; });
 
     const byWeek = {};
-    scores.forEach(s => {
+    (scores || []).forEach(s => {
         if (!byWeek[s.week_number]) byWeek[s.week_number] = [];
         byWeek[s.week_number].push(s.score);
     });
 
-    const weeks = Object.keys(byWeek).map(Number).sort((a, b) => a - b);
+    const allScheduledWeekNumbers = [...new Set((scheduledWeeks || []).map(w => w.week_number))].sort((a, b) => a - b);
+
+    if (allScheduledWeekNumbers.length === 0) {
+        container.innerHTML = '<p>No weekly tests scheduled yet this term.</p>';
+        return;
+    }
 
     let html = '<div style="display:flex; gap:1rem; flex-wrap:wrap;">';
-    weeks.forEach(week => {
-        const avg = byWeek[week].reduce((sum, s) => sum + s, 0) / byWeek[week].length;
-        const color = avg >= 70 ? '#166534' : avg >= 50 ? '#d79b00' : '#b91c1c';
-        html += `
-            <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem;">
-                <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
-                <div style="font-size:1.5rem; font-weight:bold; color:${color};">${avg.toFixed(1)}%</div>
-                <div style="font-size:0.75rem; color:#999;">${byWeek[week].length} subject${byWeek[week].length === 1 ? '' : 's'}</div>
-            </div>
-        `;
+    allScheduledWeekNumbers.forEach(week => {
+        const isPublished = publishMap[week] === true;
+        const hasScores = byWeek[week] && byWeek[week].length > 0;
+
+        if (isPublished && hasScores) {
+            const avg = byWeek[week].reduce((sum, s) => sum + s, 0) / byWeek[week].length;
+            const color = avg >= 70 ? '#166534' : avg >= 50 ? '#d79b00' : '#b91c1c';
+            html += `
+                <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1.5rem; font-weight:bold; color:${color};">${avg.toFixed(1)}%</div>
+                    <div style="font-size:0.75rem; color:#999;">${byWeek[week].length} subject${byWeek[week].length === 1 ? '' : 's'}</div>
+                </div>
+            `;
+        } else {
+            // Not published yet (or published but this student has no scores
+            // recorded for it yet) — show a clear pending state either way.
+            html += `
+                <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem; opacity:0.6;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1rem; font-weight:bold; color:#999;">🔒 Pending</div>
+                    <div style="font-size:0.75rem; color:#999;">Not yet published</div>
+                </div>
+            `;
+        }
     });
     html += '</div>';
     container.innerHTML = html;
@@ -4386,6 +4469,9 @@ async function loadWeeklyScheduleForClassWeek() {
 
     // Stash subject list for the save function
     container.dataset.subjectIds = subjects.map(s => s.id).join(',');
+
+    // Refresh the publish status box whenever class/week changes
+    loadWeeklyPublishStatus();
 }
 
 async function saveWeeklySchedule(classId, weekNumber, termId) {
@@ -4438,6 +4524,82 @@ async function saveWeeklySchedule(classId, weekNumber, termId) {
 
     statusEl.textContent = '✅ Schedule saved! Teachers can now only enter scores for the checked subjects this week.';
     statusEl.style.color = '#166534';
+}
+
+// ============================================================
+// WEEKLY RESULTS PUBLISH GATE (admin publishes weekly test
+// results per class/week, mirroring the term-level report card
+// publish flag above). Students/parents cannot see scores for a
+// week until this is toggled on — enforced by RLS at the database
+// level (see weekly-results-publish-gate.sql), not just hidden here.
+// ============================================================
+async function loadWeeklyPublishStatus() {
+    const classId = document.getElementById('scheduleClassSelect').value;
+    const weekNumber = parseInt(document.getElementById('scheduleWeekInput').value) || 1;
+    const container = document.getElementById('weeklyPublishStatusArea');
+    if (!container) return;
+
+    if (!classId) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const { data: termData } = await supabaseClient
+        .from('terms')
+        .select('id, name')
+        .eq('is_active', true)
+        .limit(1);
+    const term = termData?.[0] || { id: 1, name: 'Current Term' };
+
+    const { data: publishRow } = await supabaseClient
+        .from('weekly_results_publish')
+        .select('published')
+        .eq('term_id', term.id)
+        .eq('week_number', weekNumber)
+        .eq('class_id', classId)
+        .maybeSingle();
+
+    const isPublished = publishRow?.published || false;
+
+    container.innerHTML = `
+        <div style="margin-top:1rem; padding:0.8rem 1rem; border:1px solid #eee; border-radius:8px; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:0.5rem;">
+            <span>
+                Week ${weekNumber} results for this class are currently:
+                <strong style="color:${isPublished ? '#166534' : '#d79b00'};">
+                    ${isPublished ? '✅ Published (visible to students)' : '🔒 Not Published (hidden from students)'}
+                </strong>
+            </span>
+            <button
+                onclick="toggleWeeklyPublish(${classId}, ${weekNumber}, ${term.id}, ${!isPublished})"
+                class="${isPublished ? '' : 'btn-success'}"
+                style="border:none; border-radius:4px; padding:0.4rem 1.2rem; cursor:pointer; ${isPublished ? 'background:#b91c1c; color:white;' : ''}"
+            >
+                ${isPublished ? 'Unpublish' : 'Publish Results'}
+            </button>
+        </div>
+    `;
+}
+
+async function toggleWeeklyPublish(classId, weekNumber, termId, publish) {
+    if (publish && !confirm(`Publish Week ${weekNumber} results for this class? Students and parents will immediately be able to see them.`)) return;
+    if (!publish && !confirm(`Unpublish Week ${weekNumber} results? Students and parents will no longer be able to see them.`)) return;
+
+    const { error } = await supabaseClient
+        .from('weekly_results_publish')
+        .upsert({
+            term_id: termId,
+            week_number: weekNumber,
+            class_id: classId,
+            published: publish,
+            published_at: publish ? new Date().toISOString() : null
+        }, { onConflict: 'term_id, week_number, class_id' });
+
+    if (error) {
+        alert('Error: ' + error.message);
+        return;
+    }
+
+    loadWeeklyPublishStatus();
 }
 
 
@@ -5489,36 +5651,128 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
     junior.forEach((s, i) => { s.groupPosition = i + 1; });
     senior.forEach((s, i) => { s.groupPosition = i + 1; });
 
-    function renderSection(title, list, section) {
+    // ------------------------------------------------------------
+    // JSS (Junior) rendering: broken into ONE TABLE PER CLASS
+    // (JSS1, JSS2, JSS3, ...), each sorted by standard position-in-class
+    // ranking (1st, 2nd, 3rd...). The "Position in JSS" column still shows
+    // each student's rank across ALL junior classes combined, using the
+    // special M1/R2/E3/A4/B5 labels for the overall top 5 and plain
+    // ordinals (6th, 7th...) beyond that — exactly as before, just now
+    // displayed alongside a class-by-class layout instead of one flat list.
+    // This labeling is ONLY ever used here, for weekly test sheets — the
+    // report card (renderReportCardHTML / computeReportCardPositions)
+    // never uses these labels and always shows plain ordinals.
+    // ------------------------------------------------------------
+    function renderJuniorClassByClass(list) {
         if (list.length === 0) return '';
-        const groupLabel = section === 'Junior' ? 'Position in Junior Secondary School' : 'Position in Senior Secondary School';
+
+        const byClassName = {};
+        list.forEach(s => {
+            if (!byClassName[s.className]) byClassName[s.className] = [];
+            byClassName[s.className].push(s);
+        });
+
+        let classTables = '';
+        Object.keys(byClassName).sort().forEach(className => {
+            // Each class's own students, sorted by their standard in-class rank
+            const classList = byClassName[className].sort((a, b) => a.positionInClass - b.positionInClass);
+
+            classTables += `
+                <div style="margin-bottom:2rem;">
+                    <h4 style="color:#4a2c1a;">${className}</h4>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#4a2c1a; color:white;">
+                                <th style="padding:8px;">Position in Class</th>
+                                <th style="padding:8px;">Student</th>
+                                <th style="padding:8px;">Total</th>
+                                <th style="padding:8px;">Percentage</th>
+                                <th style="padding:8px;">Position in JSS</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${classList.map(s => `
+                                <tr style="border-bottom:1px solid #ddd;">
+                                    <td style="padding:8px; font-weight:bold;">${getOrdinal(s.positionInClass)}</td>
+                                    <td style="padding:8px;"><strong>${s.name}</strong></td>
+                                    <td style="padding:8px;">${s.total}</td>
+                                    <td style="padding:8px;">${s.percentage}%</td>
+                                    <td style="padding:8px; font-weight:bold;">${getWeeklyGroupLabel(s.groupPosition, 'Junior')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
         return `
             <div style="page-break-after:always;">
-                <h3 style="color:#4a2c1a;">${title}</h3>
-                <table style="width:100%; border-collapse:collapse;">
-                    <thead>
-                        <tr style="background:#4a2c1a; color:white;">
-                            <th style="padding:8px;">Student</th>
-                            <th style="padding:8px;">Class</th>
-                            <th style="padding:8px;">Total</th>
-                            <th style="padding:8px;">Percentage</th>
-                            <th style="padding:8px;">Position in Class</th>
-                            <th style="padding:8px;">${groupLabel}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        ${list.map(s => `
-                            <tr style="border-bottom:1px solid #ddd;">
-                                <td style="padding:8px;"><strong>${s.name}</strong></td>
-                                <td style="padding:8px;">${s.className}</td>
-                                <td style="padding:8px;">${s.total}</td>
-                                <td style="padding:8px;">${s.percentage}%</td>
-                                <td style="padding:8px;">${getOrdinal(s.positionInClass)}</td>
-                                <td style="padding:8px; font-weight:bold;">${getWeeklyGroupLabel(s.groupPosition, section)}</td>
+                <h3 style="color:#4a2c1a;">Junior Secondary School</h3>
+                <p style="font-size:0.85rem; color:#666;">Each class ranked on its own (standard position in class). "Position in JSS" ranks across all JSS classes combined \u2014 M1\u2013B5 for the overall top 5, then standard ordinals.</p>
+                ${classTables}
+            </div>
+        `;
+    }
+
+    // ------------------------------------------------------------
+    // SSS (Senior) rendering: same format as JSS - one table per class
+    // (SS1, SS2, SS3, ...), each sorted by standard position-in-class
+    // ranking. Department (Science/Social Science/etc) plays NO role
+    // anywhere in this weekly test ranking - the "Position in SSS" column
+    // ranks every senior student across every class AND every department
+    // combined into one single pool, using the special R1/J2/S3/R4/Z5
+    // labels for the overall top 5, then plain ordinals beyond that.
+    // (Department-based ranking exists only in the separate report card
+    // calculation - computeReportCardPositions - which this never touches.)
+    // ------------------------------------------------------------
+    function renderSeniorClassByClass(list) {
+        if (list.length === 0) return '';
+
+        const byClassName = {};
+        list.forEach(s => {
+            if (!byClassName[s.className]) byClassName[s.className] = [];
+            byClassName[s.className].push(s);
+        });
+
+        let classTables = '';
+        Object.keys(byClassName).sort().forEach(className => {
+            const classList = byClassName[className].sort((a, b) => a.positionInClass - b.positionInClass);
+
+            classTables += `
+                <div style="margin-bottom:2rem;">
+                    <h4 style="color:#4a2c1a;">${className}</h4>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#4a2c1a; color:white;">
+                                <th style="padding:8px;">Position in Class</th>
+                                <th style="padding:8px;">Student</th>
+                                <th style="padding:8px;">Total</th>
+                                <th style="padding:8px;">Percentage</th>
+                                <th style="padding:8px;">Position in SSS</th>
                             </tr>
-                        `).join('')}
-                    </tbody>
-                </table>
+                        </thead>
+                        <tbody>
+                            ${classList.map(s => `
+                                <tr style="border-bottom:1px solid #ddd;">
+                                    <td style="padding:8px; font-weight:bold;">${getOrdinal(s.positionInClass)}</td>
+                                    <td style="padding:8px;"><strong>${s.name}</strong></td>
+                                    <td style="padding:8px;">${s.total}</td>
+                                    <td style="padding:8px;">${s.percentage}%</td>
+                                    <td style="padding:8px; font-weight:bold;">${getWeeklyGroupLabel(s.groupPosition, 'Senior')}</td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
+        return `
+            <div style="page-break-after:always;">
+                <h3 style="color:#4a2c1a;">Senior Secondary School</h3>
+                <p style="font-size:0.85rem; color:#666;">Each class ranked on its own (standard position in class). "Position in SSS" ranks across ALL senior classes and departments combined into one pool - R1-Z5 for the overall top 5, then standard ordinals. Department plays no role in this ranking.</p>
+                ${classTables}
             </div>
         `;
     }
@@ -5541,8 +5795,8 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
             <h2 style="text-align:center; color:#4a2c1a;">Wonderhills College</h2>
             <p style="text-align:center;">Weekly Test Result Sheet — Week ${weekNumber} | ${termName}</p>
             <hr>
-            ${renderSection('Junior Secondary School', junior, 'Junior')}
-            ${renderSection('Senior Secondary School', senior, 'Senior')}
+            ${renderJuniorClassByClass(junior)}
+            ${renderSeniorClassByClass(senior)}
             <p style="text-align:center; margin-top:20px;">© 2026 Wonderhills College</p>
             <div class="no-print" style="text-align:center; margin-top:20px;">
                 <button onclick="window.print()" style="padding:10px 30px; background:#1a3c5e; color:white; border:none; border-radius:6px; cursor:pointer;">Print / Save as PDF</button>
