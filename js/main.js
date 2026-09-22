@@ -2237,7 +2237,7 @@ async function populateStudentEmailStudentFilter() {
 
 function populateTermDropdowns(terms) {
     const activeTerm = terms.find(t => t.is_active) || terms[0];
-    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect'].forEach(selectId => {
+    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect', 'certificateTermSelect'].forEach(selectId => {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = terms.map(t =>
@@ -5852,6 +5852,267 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
     printWindow.document.close();
 
     statusEl.textContent = '✅ Weekly test sheet opened in a new tab.';
+    statusEl.style.color = '#166534';
+}
+
+// ============================================================
+// WEEKLY CERTIFICATES (Top 5) - generates a Certificate of
+// Achievement PDF for each of the Top 5 JSS students and Top 5
+// SSS students for a given week, bundled into one ZIP download
+// (browsers can't cleanly trigger multiple separate file downloads
+// at once, so a ZIP is the practical way to deliver "one PDF per
+// student" as a single action).
+//
+// Uses the same ranking rules as the weekly test sheet: JSS and SSS
+// are each their own combined pool across all classes, with the
+// special M1-B5 / R1-Z5 labels for the overall top 5.
+// ============================================================
+
+// Shared ranking calculation, reused by both the weekly test sheet
+// download and certificate generation so the two can never disagree
+// about who's actually in the Top 5 for a given week.
+async function computeWeeklyRankings(weekNumber, termId) {
+    const { data: results, error } = await supabaseClient
+        .from('weekly_test_results')
+        .select(`
+            student_id,
+            score,
+            students (full_name, admission_number, class_id, classes(name, section))
+        `)
+        .eq('week_number', weekNumber)
+        .eq('term_id', termId);
+
+    if (error) return { junior: [], senior: [], error };
+    if (!results || results.length === 0) return { junior: [], senior: [], error: null };
+
+    const studentMap = {};
+    results.forEach(r => {
+        const studentId = r.student_id;
+        if (!studentMap[studentId]) {
+            studentMap[studentId] = {
+                studentId,
+                name: r.students?.full_name || 'Unknown',
+                admission: r.students?.admission_number || 'N/A',
+                className: r.students?.classes?.name || 'N/A',
+                classId: r.students?.class_id,
+                section: r.students?.classes?.section || 'Junior',
+                scores: []
+            };
+        }
+        studentMap[studentId].scores.push(r.score);
+    });
+
+    const studentList = Object.values(studentMap).map(s => {
+        const total = s.scores.reduce((sum, v) => sum + v, 0);
+        const percentage = s.scores.length > 0 ? Math.round(total / s.scores.length) : 0;
+        return { ...s, total: Math.round(total), percentage };
+    });
+
+    const byClass = {};
+    studentList.forEach(s => {
+        if (!byClass[s.classId]) byClass[s.classId] = [];
+        byClass[s.classId].push(s);
+    });
+    Object.values(byClass).forEach(list => {
+        list.sort((a, b) => b.percentage - a.percentage);
+        list.forEach((s, i) => { s.positionInClass = i + 1; });
+    });
+
+    const junior = studentList.filter(s => s.section === 'Junior').sort((a, b) => b.percentage - a.percentage);
+    const senior = studentList.filter(s => s.section === 'Senior').sort((a, b) => b.percentage - a.percentage);
+    junior.forEach((s, i) => { s.groupPosition = i + 1; });
+    senior.forEach((s, i) => { s.groupPosition = i + 1; });
+
+    return { junior, senior, error: null };
+}
+
+// Fetches an image (logo/signature) and converts it to a base64 data URL
+// so jsPDF can embed it. Wrapped in try/catch and returns null on any
+// failure (missing file, network issue, CORS) so a missing image never
+// breaks certificate generation - it just prints without that image.
+async function loadImageAsDataURL(url) {
+    try {
+        const response = await fetch(url);
+        if (!response.ok) return null;
+        const blob = await response.blob();
+        return await new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result);
+            reader.onerror = reject;
+            reader.readAsDataURL(blob);
+        });
+    } catch (err) {
+        console.warn('Could not load image for certificate:', url, err);
+        return null;
+    }
+}
+
+function drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl) {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+    const pageWidth = doc.internal.pageSize.getWidth();
+    const pageHeight = doc.internal.pageSize.getHeight();
+
+    // Decorative double border
+    doc.setDrawColor(212, 163, 115); // #d4a373
+    doc.setLineWidth(4);
+    doc.rect(20, 20, pageWidth - 40, pageHeight - 40);
+    doc.setLineWidth(1);
+    doc.rect(32, 32, pageWidth - 64, pageHeight - 64);
+
+    let cursorY = 75;
+
+    if (logoDataUrl) {
+        try {
+            doc.addImage(logoDataUrl, 'PNG', pageWidth / 2 - 30, 40, 60, 60);
+            cursorY = 118;
+        } catch (e) {
+            // If the image format trips up jsPDF, just skip it silently
+        }
+    }
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(26);
+    doc.setTextColor(74, 44, 26); // #4a2c1a
+    doc.text('Wonderhills College', pageWidth / 2, cursorY, { align: 'center' });
+
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(13);
+    doc.setTextColor(107, 58, 42); // #6b3a2a
+    doc.text('"Raising Saintly Scholars"', pageWidth / 2, cursorY + 22, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(22);
+    doc.setTextColor(26, 60, 94); // #1a3c5e
+    doc.text('Certificate of Achievement', pageWidth / 2, cursorY + 60, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(13);
+    doc.setTextColor(60, 42, 30);
+    doc.text('This certificate is proudly presented to', pageWidth / 2, cursorY + 92, { align: 'center' });
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(25);
+    doc.setTextColor(74, 44, 26);
+    doc.text(student.name, pageWidth / 2, cursorY + 128, { align: 'center' });
+
+    const label = getWeeklyGroupLabel(student.groupPosition, sectionKey);
+    const sectionFullName = sectionKey === 'Junior' ? 'Junior Secondary School' : 'Senior Secondary School';
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(14);
+    doc.setTextColor(60, 42, 30);
+    doc.text(
+        `for achieving position ${label} (${getOrdinal(student.groupPosition)} overall) in ${sectionFullName}`,
+        pageWidth / 2, cursorY + 158, { align: 'center' }
+    );
+    doc.text(
+        `Weekly Test — Week ${weekNumber}, ${termName}`,
+        pageWidth / 2, cursorY + 180, { align: 'center' }
+    );
+    doc.setFont('helvetica', 'bold');
+    doc.text(
+        `Score: ${student.percentage}%  |  Class: ${student.className}`,
+        pageWidth / 2, cursorY + 204, { align: 'center' }
+    );
+
+    // Signature block
+    const sigLineY = pageHeight - 85;
+    if (signatureDataUrl) {
+        try {
+            doc.addImage(signatureDataUrl, 'PNG', pageWidth / 2 - 50, sigLineY - 45, 100, 40);
+        } catch (e) {
+            // Skip silently if the image can't be embedded
+        }
+    }
+    doc.setDrawColor(51, 51, 51);
+    doc.setLineWidth(1);
+    doc.line(pageWidth / 2 - 100, sigLineY, pageWidth / 2 + 100, sigLineY);
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(11);
+    doc.setTextColor(51, 51, 51);
+    doc.text("Principal's Signature", pageWidth / 2, sigLineY + 16, { align: 'center' });
+    doc.text(new Date().toLocaleDateString(), pageWidth / 2, sigLineY + 32, { align: 'center' });
+
+    return doc;
+}
+
+async function generateWeeklyCertificates(weekNumber, termId) {
+    const statusEl = document.getElementById('certificateStatus');
+    if (!statusEl) {
+        alert('Certificate status element not found.');
+        return;
+    }
+
+    if (typeof window.jspdf === 'undefined' || typeof JSZip === 'undefined') {
+        statusEl.textContent = '❌ Certificate libraries failed to load. Check your internet connection and refresh the page.';
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    if (!weekNumber || !termId) {
+        statusEl.textContent = '❌ Please select a term and enter a week number.';
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    statusEl.textContent = '⏳ Calculating rankings...';
+    statusEl.style.color = '#1a3c5e';
+
+    const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
+    const termName = termRow?.name || `Term ${termId}`;
+
+    const { junior, senior, error } = await computeWeeklyRankings(weekNumber, termId);
+
+    if (error) {
+        statusEl.textContent = '❌ Error: ' + error.message;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    const juniorTop5 = junior.filter(s => s.groupPosition <= 5);
+    const seniorTop5 = senior.filter(s => s.groupPosition <= 5);
+
+    if (juniorTop5.length === 0 && seniorTop5.length === 0) {
+        statusEl.textContent = '⚠️ No scores recorded for that week yet, so there\'s no Top 5 to generate certificates for.';
+        statusEl.style.color = '#d79b00';
+        return;
+    }
+
+    statusEl.textContent = '⏳ Loading logo and signature...';
+    const logoDataUrl = await loadImageAsDataURL('images/wonderhills-logo.png');
+    const signatureUrl = await getPrincipalSignatureUrl();
+    const signatureDataUrl = signatureUrl ? await loadImageAsDataURL(signatureUrl) : null;
+
+    statusEl.textContent = '⏳ Generating certificates...';
+
+    const zip = new JSZip();
+
+    function addCertificateToZip(student, sectionKey, prefix) {
+        const doc = drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl);
+        const safeName = student.name.replace(/[^a-zA-Z0-9]+/g, '_');
+        const label = getWeeklyGroupLabel(student.groupPosition, sectionKey);
+        const fileName = `${prefix}-${label}-${safeName}.pdf`;
+        zip.file(fileName, doc.output('blob'));
+    }
+
+    juniorTop5.forEach(student => addCertificateToZip(student, 'Junior', 'JSS'));
+    seniorTop5.forEach(student => addCertificateToZip(student, 'Senior', 'SSS'));
+
+    statusEl.textContent = '⏳ Packaging into ZIP...';
+
+    const zipBlob = await zip.generateAsync({ type: 'blob' });
+    const url = URL.createObjectURL(zipBlob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `Week${weekNumber}-Certificates-${termName.replace(/\s+/g, '_')}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    const totalCount = juniorTop5.length + seniorTop5.length;
+    statusEl.textContent = `✅ ${totalCount} certificate(s) generated! Downloaded as a ZIP file containing one PDF per student.`;
     statusEl.style.color = '#166534';
 }
 
