@@ -60,6 +60,34 @@ function getGradeColor(grade) {
     return '#b91c1c'; // E, F
 }
 
+// ============================================================
+// TEST GRADE (separate banding system, NOT the same as the
+// letter grade above). This is intentionally its own scale, used
+// ONLY by the Weekly Test Grades feature - it takes a student's
+// weekly percentage and converts it to a band label. The number
+// itself is never shown anywhere in that feature, only the label.
+// ============================================================
+function getTestGradeLabel(percentage) {
+    if (percentage >= 90) return 'Outstanding';
+    if (percentage >= 70) return 'Champions';
+    if (percentage >= 60) return 'Boosters';
+    if (percentage >= 40) return 'Movers';
+    if (percentage >= 25) return 'Climbers';
+    return 'Starters';
+}
+
+function getTestGradeColor(label) {
+    switch (label) {
+        case 'Outstanding': return '#b8860b'; // gold
+        case 'Champions': return '#166534';   // green
+        case 'Boosters': return '#1a3c5e';    // dark blue
+        case 'Movers': return '#4a90d9';      // light blue
+        case 'Climbers': return '#d79b00';    // amber
+        case 'Starters': return '#b91c1c';    // red
+        default: return '#666666';
+    }
+}
+
 function getOrdinal(n) {
     if (!n || n < 1) return '-';
     const suffixes = ['th', 'st', 'nd', 'rd'];
@@ -1198,6 +1226,7 @@ document.addEventListener('DOMContentLoaded', function() {
         loadStudentProfile();
         loadStudentReport();
         loadStudentWeeklyAverages();
+        loadStudentWeeklyTestGrades();
         loadStudentAttendance();
         loadStudentTimetable();
         loadStudentAIAnalytics();
@@ -4185,6 +4214,102 @@ async function loadStudentWeeklyAverages() {
     container.innerHTML = html;
 }
 
+// ============================================================
+// WEEKLY TEST GRADES (student dashboard) - an entirely separate
+// display from Weekly Averages above. Uses the exact same
+// underlying weekly percentage, but converts it to a band label
+// (Starters/Climbers/Movers/Boosters/Champions/Outstanding) and
+// NEVER shows the percentage/score itself - only the label.
+// Respects the same publish gate: a week shows "Pending" until
+// the admin publishes it, exactly like Weekly Averages.
+// ============================================================
+async function loadStudentWeeklyTestGrades() {
+    const container = document.getElementById('weeklyTestGradesContainer');
+    if (!container) return;
+
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    const { data: studentData } = await supabaseClient
+        .from('students')
+        .select('id, class_id')
+        .eq('user_id', user.id)
+        .maybeSingle();
+
+    if (!studentData) {
+        container.innerHTML = '<p>No student record found.</p>';
+        return;
+    }
+
+    const { data: termData } = await supabaseClient
+        .from('terms')
+        .select('id')
+        .eq('is_active', true)
+        .limit(1);
+    const termId = termData?.[0]?.id || 1;
+
+    const { data: scores } = await supabaseClient
+        .from('weekly_test_results')
+        .select('week_number, score')
+        .eq('student_id', studentData.id)
+        .eq('term_id', termId);
+
+    const { data: scheduledWeeks } = await supabaseClient
+        .from('weekly_test_schedule')
+        .select('week_number')
+        .eq('term_id', termId)
+        .eq('class_id', studentData.class_id);
+
+    const { data: publishRows } = await supabaseClient
+        .from('weekly_results_publish')
+        .select('week_number, published')
+        .eq('term_id', termId)
+        .eq('class_id', studentData.class_id);
+
+    const publishMap = {};
+    (publishRows || []).forEach(p => { publishMap[p.week_number] = p.published; });
+
+    const byWeek = {};
+    (scores || []).forEach(s => {
+        if (!byWeek[s.week_number]) byWeek[s.week_number] = [];
+        byWeek[s.week_number].push(s.score);
+    });
+
+    const allScheduledWeekNumbers = [...new Set((scheduledWeeks || []).map(w => w.week_number))].sort((a, b) => a - b);
+
+    if (allScheduledWeekNumbers.length === 0) {
+        container.innerHTML = '<p>No weekly tests scheduled yet this term.</p>';
+        return;
+    }
+
+    let html = '<div style="display:flex; gap:1rem; flex-wrap:wrap;">';
+    allScheduledWeekNumbers.forEach(week => {
+        const isPublished = publishMap[week] === true;
+        const hasScores = byWeek[week] && byWeek[week].length > 0;
+
+        if (isPublished && hasScores) {
+            // The percentage is only ever used internally here to pick the
+            // label - it is never rendered to the page.
+            const avg = byWeek[week].reduce((sum, s) => sum + s, 0) / byWeek[week].length;
+            const label = getTestGradeLabel(avg);
+            const color = getTestGradeColor(label);
+            html += `
+                <div class="glass-card" style="flex:1 1 130px; text-align:center; padding:1rem;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1.3rem; font-weight:bold; color:${color}; margin-top:0.3rem;">${label}</div>
+                </div>
+            `;
+        } else {
+            html += `
+                <div class="glass-card" style="flex:1 1 130px; text-align:center; padding:1rem; opacity:0.6;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1rem; font-weight:bold; color:#999; margin-top:0.3rem;">🔒 Pending</div>
+                </div>
+            `;
+        }
+    });
+    html += '</div>';
+    container.innerHTML = html;
+}
+
 // Groups attendance records into a weekly grid — Monday to Friday columns,
 // one row per week — instead of a flat chronological list. Only real
 // marked records ever appear; there's never a fabricated blank day.
@@ -5856,6 +5981,140 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
 }
 
 // ============================================================
+// WEEKLY TEST GRADES (admin download) - a completely separate
+// feature from the weekly test SCORE sheet above. Uses the exact
+// same underlying scores/rankings, but converts each student's
+// weekly percentage into a band label (Starters/Climbers/Movers/
+// Boosters/Champions/Outstanding) and NEVER prints the actual
+// percentage or score anywhere in this sheet - only the label.
+// No positions or M1-B5/R1-Z5 labels here either, since this
+// isn't a ranking system - it's a performance band per student.
+// ============================================================
+async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds) {
+    const statusEl = document.getElementById('downloadStatus');
+    if (!statusEl) {
+        alert('Download status element not found.');
+        return;
+    }
+
+    statusEl.textContent = '⏳ Generating Weekly Test Grades sheet...';
+    statusEl.style.color = '#1a3c5e';
+
+    const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
+    const termName = termRow?.name || `Term ${termId}`;
+
+    const { junior, senior, error } = await computeWeeklyRankings(weekNumber, termId);
+
+    if (error) {
+        statusEl.textContent = '❌ Error: ' + error.message;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    function applyFilters(list) {
+        if (studentIds && studentIds.length > 0) {
+            return list.filter(s => studentIds.includes(s.studentId));
+        }
+        if (classId) {
+            return list.filter(s => s.classId === parseInt(classId));
+        }
+        return list;
+    }
+
+    const juniorFiltered = applyFilters(junior);
+    const seniorFiltered = applyFilters(senior);
+
+    if (juniorFiltered.length === 0 && seniorFiltered.length === 0) {
+        statusEl.textContent = '⚠️ No scores recorded for that week / selection yet.';
+        statusEl.style.color = '#d79b00';
+        return;
+    }
+
+    function renderGradeSection(title, list) {
+        if (list.length === 0) return '';
+
+        const byClassName = {};
+        list.forEach(s => {
+            if (!byClassName[s.className]) byClassName[s.className] = [];
+            byClassName[s.className].push(s);
+        });
+
+        let classTables = '';
+        Object.keys(byClassName).sort().forEach(className => {
+            const classList = byClassName[className].sort((a, b) => a.name.localeCompare(b.name));
+            classTables += `
+                <div style="margin-bottom:1.5rem;">
+                    <h4 style="color:#4a2c1a;">${className}</h4>
+                    <table style="width:100%; border-collapse:collapse;">
+                        <thead>
+                            <tr style="background:#4a2c1a; color:white;">
+                                <th style="padding:8px;">Student</th>
+                                <th style="padding:8px;">Weekly Test Grade</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${classList.map(s => {
+                                const label = getTestGradeLabel(s.percentage);
+                                const color = getTestGradeColor(label);
+                                return `
+                                    <tr style="border-bottom:1px solid #ddd;">
+                                        <td style="padding:8px;"><strong>${s.name}</strong></td>
+                                        <td style="padding:8px; font-weight:bold; color:${color};">${label}</td>
+                                    </tr>
+                                `;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            `;
+        });
+
+        return `
+            <div style="page-break-after:always;">
+                <h3 style="color:#4a2c1a;">${title}</h3>
+                ${classTables}
+            </div>
+        `;
+    }
+
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+        <head>
+            <title>Weekly Test Grades - Week ${weekNumber}</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 40px; }
+                table { width: 100%; border-collapse: collapse; }
+                th { background: #4a2c1a; color: white; padding: 8px; text-align: left; }
+                td { padding: 8px; border-bottom: 1px solid #ddd; }
+                hr { border: 1px solid #d4a373; margin: 1rem 0; }
+                @media print { body { padding: 0; } }
+            </style>
+        </head>
+        <body>
+            <h2 style="text-align:center; color:#4a2c1a;">Wonderhills College</h2>
+            <p style="text-align:center;">Weekly Test Grades — Week ${weekNumber} | ${termName}</p>
+            <p style="text-align:center; font-size:0.85rem; color:#666;">
+                Starters (0-24) &nbsp;·&nbsp; Climbers (25-39) &nbsp;·&nbsp; Movers (40-59) &nbsp;·&nbsp;
+                Boosters (60-69) &nbsp;·&nbsp; Champions (70-89) &nbsp;·&nbsp; Outstanding (90-100)
+            </p>
+            <hr>
+            ${renderGradeSection('Junior Secondary School', juniorFiltered)}
+            ${renderGradeSection('Senior Secondary School', seniorFiltered)}
+            <p style="text-align:center; margin-top:20px;">© 2026 Wonderhills College</p>
+            <div class="no-print" style="text-align:center; margin-top:20px;">
+                <button onclick="window.print()" style="padding:10px 30px; background:#1a3c5e; color:white; border:none; border-radius:6px; cursor:pointer;">Print / Save as PDF</button>
+            </div>
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
+
+    statusEl.textContent = '✅ Weekly Test Grades sheet opened in a new tab.';
+    statusEl.style.color = '#166534';
+}
+
+// ============================================================
 // WEEKLY CERTIFICATES (Top 5) - generates a Certificate of
 // Achievement PDF for each of the Top 5 JSS students and Top 5
 // SSS students for a given week, bundled into one ZIP download
@@ -5947,7 +6206,7 @@ async function loadImageAsDataURL(url) {
     }
 }
 
-function drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl) {
+function drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl, qrDataUrl) {
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
     const pageWidth = doc.internal.pageSize.getWidth();
@@ -6016,23 +6275,49 @@ function drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataU
         pageWidth / 2, cursorY + 204, { align: 'center' }
     );
 
-    // Signature block
+    // Signature block (left side) and QR verification block (right side),
+    // side by side so neither overlaps the other.
     const sigLineY = pageHeight - 85;
+    const leftCenterX = pageWidth * 0.28;
+    const rightCenterX = pageWidth * 0.72;
+
     if (signatureDataUrl) {
         try {
-            doc.addImage(signatureDataUrl, 'PNG', pageWidth / 2 - 50, sigLineY - 45, 100, 40);
+            doc.addImage(signatureDataUrl, 'PNG', leftCenterX - 50, sigLineY - 45, 100, 40);
         } catch (e) {
             // Skip silently if the image can't be embedded
         }
     }
     doc.setDrawColor(51, 51, 51);
     doc.setLineWidth(1);
-    doc.line(pageWidth / 2 - 100, sigLineY, pageWidth / 2 + 100, sigLineY);
+    doc.line(leftCenterX - 90, sigLineY, leftCenterX + 90, sigLineY);
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(11);
     doc.setTextColor(51, 51, 51);
-    doc.text("Principal's Signature", pageWidth / 2, sigLineY + 16, { align: 'center' });
-    doc.text(new Date().toLocaleDateString(), pageWidth / 2, sigLineY + 32, { align: 'center' });
+    doc.text("Principal's Signature", leftCenterX, sigLineY + 16, { align: 'center' });
+    doc.text(new Date().toLocaleDateString(), leftCenterX, sigLineY + 32, { align: 'center' });
+
+    // QR code with the school logo overlaid in the middle. The QR is
+    // generated with ecc=H (highest error correction), which is what
+    // allows roughly the middle third to be covered by a logo without
+    // breaking the scan - so the logo just draws directly on top of it.
+    if (qrDataUrl) {
+        const qrSize = 74;
+        const qrX = rightCenterX - qrSize / 2;
+        const qrY = sigLineY - qrSize + 8;
+        try {
+            doc.addImage(qrDataUrl, 'PNG', qrX, qrY, qrSize, qrSize);
+            if (logoDataUrl) {
+                const logoSize = qrSize * 0.26; // stays within the ~30% safe zone for ecc=H
+                doc.addImage(logoDataUrl, 'PNG', qrX + (qrSize - logoSize) / 2, qrY + (qrSize - logoSize) / 2, logoSize, logoSize);
+            }
+        } catch (e) {
+            // Skip silently if the QR/logo can't be embedded
+        }
+        doc.setFontSize(9);
+        doc.setTextColor(102, 102, 102);
+        doc.text('Scan to verify', rightCenterX, qrY + qrSize + 14, { align: 'center' });
+    }
 
     return doc;
 }
@@ -6084,20 +6369,30 @@ async function generateWeeklyCertificates(weekNumber, termId) {
     const signatureUrl = await getPrincipalSignatureUrl();
     const signatureDataUrl = signatureUrl ? await loadImageAsDataURL(signatureUrl) : null;
 
-    statusEl.textContent = '⏳ Generating certificates...';
-
     const zip = new JSZip();
+    const allWinners = [...juniorTop5.map(s => ({ student: s, sectionKey: 'Junior', prefix: 'JSS' })),
+                        ...seniorTop5.map(s => ({ student: s, sectionKey: 'Senior', prefix: 'SSS' }))];
 
-    function addCertificateToZip(student, sectionKey, prefix) {
-        const doc = drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl);
-        const safeName = student.name.replace(/[^a-zA-Z0-9]+/g, '_');
+    for (let i = 0; i < allWinners.length; i++) {
+        const { student, sectionKey, prefix } = allWinners[i];
+        statusEl.textContent = `⏳ Generating certificate ${i + 1} of ${allWinners.length}...`;
+
         const label = getWeeklyGroupLabel(student.groupPosition, sectionKey);
+
+        // Each certificate gets its own unique QR code (encodes the
+        // student + week + position), generated with ecc=H (highest
+        // error correction) so the logo overlay doesn't break the scan.
+        const qrPayload = encodeURIComponent(
+            `Wonderhills College | ${student.name} | ${student.admission} | Week ${weekNumber} ${termName} | ${label}`
+        );
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&ecc=H&data=${qrPayload}`;
+        const qrDataUrl = await loadImageAsDataURL(qrUrl);
+
+        const doc = drawCertificatePDF(student, sectionKey, weekNumber, termName, logoDataUrl, signatureDataUrl, qrDataUrl);
+        const safeName = student.name.replace(/[^a-zA-Z0-9]+/g, '_');
         const fileName = `${prefix}-${label}-${safeName}.pdf`;
         zip.file(fileName, doc.output('blob'));
     }
-
-    juniorTop5.forEach(student => addCertificateToZip(student, 'Junior', 'JSS'));
-    seniorTop5.forEach(student => addCertificateToZip(student, 'Senior', 'SSS'));
 
     statusEl.textContent = '⏳ Packaging into ZIP...';
 
