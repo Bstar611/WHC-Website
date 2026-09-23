@@ -407,6 +407,17 @@
                                 </div>
                                 <small style="color:#666;">Enter week number</small>
                             </div>
+                            <div>
+                                <button onclick="downloadWeeklyTestGrades(
+                                    parseInt(document.getElementById('weekNumberInput').value),
+                                    parseInt(document.getElementById('reportTermSelect').value),
+                                    document.getElementById('reportClassFilter').value || null,
+                                    getSelectedReportStudentIds()
+                                )" class="btn-primary" style="width:100%; border:none; cursor:pointer; padding:0.6rem;">
+                                    🎯 Test Grades
+                                </button>
+                                <small style="color:#666;">Uses the week number above</small>
+                            </div>
                         </div>
                         <div id="downloadStatus" style="margin-top:1rem; font-weight:bold;"></div>
                     </div>
