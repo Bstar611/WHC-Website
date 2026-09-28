@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Admin Dashboard - Wonderhills</title>
     <link rel="stylesheet" href="css/style.css" />
-    <link rel="icon" href="/images/favicon.png" type="image/png">
+    <link rel="icon" href="/images/favicon.png.png" type="image/png">
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -13,7 +13,7 @@
 <body>
     <header>
         <div class="container">
-            <div class="logo"><img src="images/wonderhills-logo.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
+            <div class="logo"><img src="images/wonderhills-logo.png.png" alt="Wonderhills College Logo" class="site-logo"><h1><span>Wonderhills</span> College</h1></div>
             <nav>
                 <ul>
                     <li><a href="index.html">Home</a></li>
@@ -89,6 +89,10 @@
                             <select id="subjectTeacher" style="width:100%; margin-bottom:0.5rem; padding:0.5rem;">
                                 <option value="">Select Teacher</option>
                             </select>
+                            <select id="subjectDepartment" style="width:100%; margin-bottom:0.3rem; padding:0.5rem;">
+                                <option value="">Not department-specific (all students take this)</option>
+                            </select>
+                            <small style="color:#666; display:block; margin-bottom:0.5rem;">Only set this for Senior Secondary subjects that belong to one department (e.g. Physics = Science only). Leave blank for JSS subjects and core subjects everyone takes (Math, English, etc).</small>
                             <button onclick="saveSubject()" class="btn-primary" style="width:100%; border:none; cursor:pointer;">Save Subject</button>
                         </div>
                         <input type="text" id="subjectSearchInput" oninput="filterSubjectList()" placeholder="🔍 Search by subject, class, or teacher..." style="width:100%; margin-top:1rem; padding:0.6rem; border-radius:8px; border:1px solid #ccc;">
@@ -447,6 +451,40 @@
                             </button>
                         </div>
                         <div id="certificateStatus" style="margin-top:1rem; font-weight:bold;"></div>
+                    </div>
+
+                    <!-- ============================================================ -->
+                    <!-- MISSING SCORES CHECK -->
+                    <!-- ============================================================ -->
+                    <div class="glass-card" style="text-align:center; grid-column: span 2;">
+                        <h3>🔍 Missing Scores Check</h3>
+                        <p>Pick a class, week, and term to see exactly which students are missing a score for any approved subject that week — so you can follow up with the teacher before results get published.</p>
+                        <div style="display:flex; gap:1rem; flex-wrap:wrap; justify-content:center; margin-top:1rem; align-items:flex-end;">
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Class</label>
+                                <select id="missingScoresClassSelect" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Select a class...</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Week</label>
+                                <input type="number" id="missingScoresWeekInput" value="1" min="1" max="20" style="width:80px; padding:0.5rem; border-radius:8px; border:1px solid #ccc;">
+                            </div>
+                            <div>
+                                <label style="font-weight:600; font-size:0.9rem; display:block; margin-bottom:0.3rem;">Term</label>
+                                <select id="missingScoresTermSelect" style="padding:0.5rem; border-radius:8px; border:1px solid #ccc; min-width:180px;">
+                                    <option value="">Loading terms...</option>
+                                </select>
+                            </div>
+                            <button onclick="checkMissingScores(
+                                document.getElementById('missingScoresClassSelect').value,
+                                parseInt(document.getElementById('missingScoresWeekInput').value),
+                                parseInt(document.getElementById('missingScoresTermSelect').value)
+                            )" class="btn-primary" style="border:none; cursor:pointer; padding:0.6rem 2rem;">
+                                🔍 Check Missing Scores
+                            </button>
+                        </div>
+                        <div id="missingScoresResults" style="margin-top:1.5rem; text-align:left;"></div>
                     </div>
 
                     <!-- ============================================================ -->
