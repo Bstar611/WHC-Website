@@ -4685,7 +4685,7 @@ async function loadWeeklyScheduleClasses() {
 async function computeMissingScoresForClass(classId, weekNumber, termId) {
     const { data: scheduled, error: scheduleError } = await supabaseClient
         .from('weekly_test_schedule')
-        .select('subject_id, subjects(name)')
+        .select('subject_id, subjects(name, department_id)')
         .eq('class_id', classId)
         .eq('week_number', weekNumber)
         .eq('term_id', termId);
@@ -4695,7 +4695,7 @@ async function computeMissingScoresForClass(classId, weekNumber, termId) {
 
     const { data: students, error: studentsError } = await supabaseClient
         .from('students')
-        .select('id, full_name, admission_number')
+        .select('id, full_name, admission_number, department_id')
         .eq('class_id', classId)
         .order('full_name');
 
@@ -4717,12 +4717,23 @@ async function computeMissingScoresForClass(classId, weekNumber, termId) {
     let totalMissingCount = 0;
     const subjectsResult = [];
     scheduled.forEach(sub => {
-        const missingStudents = students.filter(s => !existingSet.has(`${s.id}|${sub.subject_id}`));
+        // A department-specific subject (e.g. Physics = Science only) only
+        // applies to students in that department - a Social Science student
+        // is never expected to have a Physics score, so they must not be
+        // counted as "missing" one. Core subjects (no department) apply to
+        // everyone in the class, as before.
+        const subjectDepartmentId = sub.subjects?.department_id || null;
+        const applicableStudents = subjectDepartmentId
+            ? students.filter(s => s.department_id === subjectDepartmentId)
+            : students;
+
+        const missingStudents = applicableStudents.filter(s => !existingSet.has(`${s.id}|${sub.subject_id}`));
         if (missingStudents.length > 0) {
             totalMissingCount += missingStudents.length;
             subjectsResult.push({
                 subjectName: sub.subjects?.name || 'Unknown Subject',
-                missingStudents
+                missingStudents,
+                applicableCount: applicableStudents.length
             });
         }
     });
@@ -4768,7 +4779,7 @@ async function checkMissingScores(classId, weekNumber, termId) {
         html += `
             <div style="margin-bottom:1rem; padding:0.8rem 1rem; border:1px solid #f0d0c0; background:#fff8f5; border-radius:8px;">
                 <strong style="color:#b91c1c;">${sub.subjectName}</strong>
-                <span style="color:#666; font-size:0.85rem;"> — missing for ${sub.missingStudents.length} of ${result.totalStudents} student(s)</span>
+                <span style="color:#666; font-size:0.85rem;"> — missing for ${sub.missingStudents.length} of ${sub.applicableCount} student(s)</span>
                 <ul style="margin:0.5rem 0 0 1.2rem; padding:0;">
                     ${sub.missingStudents.map(s => `<li>${s.full_name} <span style="color:#999; font-size:0.85rem;">(${s.admission_number})</span></li>`).join('')}
                 </ul>
