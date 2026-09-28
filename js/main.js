@@ -88,6 +88,14 @@ function getTestGradeColor(label) {
     }
 }
 
+// Numeric rank for sorting by band (lowest to highest), since band
+// names alone don't sort in a meaningful order alphabetically.
+function getTestGradeRank(label) {
+    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Outstanding'];
+    const idx = order.indexOf(label);
+    return idx === -1 ? order.length : idx;
+}
+
 function getOrdinal(n) {
     if (!n || n < 1) return '-';
     const suffixes = ['th', 'st', 'nd', 'rd'];
@@ -1513,13 +1521,19 @@ async function loadSubjects() {
 
     const { data, error } = await supabaseClient
         .from('subjects')
-        .select('*, staff(name), classes(name)')
+        .select('*, staff(name), classes(name), departments(name)')
         .order('name');
 
     if (error) {
         container.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
         return;
     }
+
+    // Needed for the inline department dropdown below - fetched here too
+    // (not just in loadStudents) so this works correctly regardless of
+    // which function happened to run first on page load.
+    const { data: depts } = await supabaseClient.from('departments').select('id, name').order('name');
+    allDepartmentsCache = depts || [];
 
     allSubjectsCache = data || [];
     renderSubjectList(allSubjectsCache);
@@ -1556,6 +1570,12 @@ function renderSubjectList(subjects) {
                         <li style="padding:0.5rem 0; border-bottom:1px solid #eee;">
                             <strong>${s.name}</strong><br>
                             Teacher: ${s.staff?.name || 'Not assigned'}
+                            <br>
+                            <label style="font-size:0.85rem; color:#6b3a2a;">Department: </label>
+                            <select onchange="setSubjectDepartment(${s.id}, this.value)" style="padding:0.2rem; border-radius:4px; border:1px solid #ccc; font-size:0.85rem;">
+                                <option value="">Not department-specific</option>
+                                ${allDepartmentsCache.map(d => `<option value="${d.id}" ${s.department_id === d.id ? 'selected' : ''}>${d.name} only</option>`).join('')}
+                            </select>
                             <button onclick="deleteSubject(${s.id})" style="float:right; background:#b91c1c; color:white; border:none; border-radius:4px; padding:0.2rem 0.8rem; cursor:pointer;">Delete</button>
                         </li>
                     `).join('')}
@@ -1586,7 +1606,16 @@ function showAddSubjectForm() {
         container.style.display = container.style.display === 'none' ? 'block' : 'none';
         loadClassesDropdown();
         populateSubjectFormTeacherDropdown();
+        populateSubjectFormDepartmentDropdown();
     }
+}
+
+async function populateSubjectFormDepartmentDropdown() {
+    const select = document.getElementById('subjectDepartment');
+    if (!select) return;
+    const { data: departments } = await supabaseClient.from('departments').select('id, name').order('name');
+    select.innerHTML = '<option value="">Not department-specific (all students take this)</option>' +
+        (departments || []).map(d => `<option value="${d.id}">${d.name} only</option>`).join('');
 }
 
 async function populateSubjectFormTeacherDropdown() {
@@ -1618,6 +1647,7 @@ async function saveSubject() {
     const name = document.getElementById('subjectName').value;
     const classId = document.getElementById('subjectClass').value;
     const teacherId = document.getElementById('subjectTeacher').value;
+    const departmentId = document.getElementById('subjectDepartment')?.value || null;
 
     if (!name || !classId) {
         alert('Please enter subject name and select a class.');
@@ -1626,7 +1656,7 @@ async function saveSubject() {
 
     const { error } = await supabaseClient
         .from('subjects')
-        .insert([{ name, class_id: classId, teacher_id: teacherId || null }]);
+        .insert([{ name, class_id: classId, teacher_id: teacherId || null, department_id: departmentId || null }]);
 
     if (error) {
         alert('Error saving subject: ' + error.message);
@@ -1637,6 +1667,7 @@ async function saveSubject() {
     document.getElementById('subjectName').value = '';
     document.getElementById('subjectClass').value = '';
     document.getElementById('subjectTeacher').value = '';
+    if (document.getElementById('subjectDepartment')) document.getElementById('subjectDepartment').value = '';
     document.getElementById('subjectFormContainer').style.display = 'none';
     loadSubjects();
 }
@@ -1841,6 +1872,23 @@ async function setStudentDepartment(studentId, departmentId) {
     // Update the cache in place so the dropdown doesn't visually reset on next render
     const student = allStudentsCache.find(s => s.id === studentId);
     if (student) student.department_id = departmentId ? parseInt(departmentId) : null;
+}
+
+// Lets you retroactively assign (or change) a department on a subject
+// you already created - e.g. tagging "Physics" as Science-only after
+// the fact, without needing to delete and recreate it.
+async function setSubjectDepartment(subjectId, departmentId) {
+    const { error } = await supabaseClient
+        .from('subjects')
+        .update({ department_id: departmentId || null })
+        .eq('id', subjectId);
+    if (error) {
+        alert('Error setting subject department: ' + error.message);
+        return;
+    }
+    // Update the cache in place so the dropdown doesn't visually reset
+    const subject = allSubjectsCache.find(s => s.id === subjectId);
+    if (subject) subject.department_id = departmentId ? parseInt(departmentId) : null;
 }
 
 function filterStudentList() {
@@ -2266,7 +2314,7 @@ async function populateStudentEmailStudentFilter() {
 
 function populateTermDropdowns(terms) {
     const activeTerm = terms.find(t => t.is_active) || terms[0];
-    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect', 'certificateTermSelect'].forEach(selectId => {
+    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect', 'certificateTermSelect', 'missingScoresTermSelect'].forEach(selectId => {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = terms.map(t =>
@@ -2999,7 +3047,7 @@ async function loadTeacherSubjects() {
                 </summary>
                 <div style="display:flex; gap:0.6rem; flex-wrap:wrap; margin-top:0.6rem;">
                     ${entries.map(tc => `
-                        <button onclick="loadStudentsForSubject(${tc.subject_id}, ${tc.class_id})"
+                        <button onclick="loadStudentsForSubject(${tc.subject_id}, ${tc.class_id}, '${(tc.subjects?.name || '').replace(/'/g, "\\'")}', '${(tc.classes?.name || '').replace(/'/g, "\\'")}')"
                                 class="btn-secondary" style="padding:0.5rem 1.2rem; cursor:pointer;">
                             ${tc.classes?.name || 'N/A'}
                         </button>
@@ -3014,9 +3062,19 @@ async function loadTeacherSubjects() {
 
 let currentWeekNumber = 1;
 let currentTermWeeksCount = 8;
+let currentSubjectName = '';
+let currentClassNameForScoring = '';
+let currentClassId = null;
 
-async function loadStudentsForSubject(subjectId, classId) {
+async function loadStudentsForSubject(subjectId, classId, subjectName, className) {
     currentSubjectId = subjectId;
+    currentClassId = classId;
+    // Names are passed in from the button that was clicked; fall back to
+    // whatever was last known if this call came from somewhere that
+    // didn't pass them (e.g. the week-change dropdown re-calling this).
+    if (subjectName !== undefined) currentSubjectName = subjectName;
+    if (className !== undefined) currentClassNameForScoring = className;
+
     const area = document.getElementById('studentListArea');
     area.innerHTML = '<p>Loading students...</p>';
 
@@ -3027,6 +3085,17 @@ async function loadStudentsForSubject(subjectId, classId) {
         .limit(1);
     currentTermId = termData?.[0]?.id || 1;
     currentTermWeeksCount = termData?.[0]?.weeks_count || 8;
+
+    // Look up whether this subject is department-specific (e.g. Physics
+    // for Science only) - null/no row means it's a core subject every
+    // student in the class takes.
+    const { data: subjectRow } = await supabaseClient
+        .from('subjects')
+        .select('department_id, departments(name)')
+        .eq('id', subjectId)
+        .maybeSingle();
+    const subjectDepartmentId = subjectRow?.department_id || null;
+    const subjectDepartmentName = subjectRow?.departments?.name || null;
 
     // Only weeks the admin has actually approved for THIS subject/class
     // show up here — this is a hard requirement, also enforced at the
@@ -3042,8 +3111,20 @@ async function loadStudentsForSubject(subjectId, classId) {
 
     const weekOptions = [...new Set((approvedWeeks || []).map(w => w.week_number))];
 
+    // This header stays visible throughout scoring, regardless of what
+    // happens below, so a teacher can never lose track of which subject
+    // and class they're currently entering scores for.
+    const headerHtml = `
+        <div style="background:#4a2c1a; color:white; padding:1rem 1.2rem; border-radius:8px; margin-bottom:1.2rem; text-align:center;">
+            <div style="font-size:0.8rem; opacity:0.85; letter-spacing:0.5px;">YOU ARE ENTERING SCORES FOR</div>
+            <div style="font-size:1.4rem; font-weight:bold; margin-top:0.2rem;">📖 ${currentSubjectName || 'Subject'} — ${currentClassNameForScoring || 'Class'}</div>
+            ${subjectDepartmentName ? `<div style="font-size:0.85rem; margin-top:0.3rem; opacity:0.9;">🏛️ ${subjectDepartmentName} students only</div>` : ''}
+        </div>
+    `;
+
     if (weekOptions.length === 0) {
         area.innerHTML = `
+            ${headerHtml}
             <div class="glass-card" style="text-align:center;">
                 <p>📭 No weeks have been approved yet for this subject in this class.</p>
                 <p style="font-size:0.9rem; color:#6b3a2a;">Ask the admin to approve this subject under "Weekly Test Schedule" before you can enter scores.</p>
@@ -3054,22 +3135,36 @@ async function loadStudentsForSubject(subjectId, classId) {
 
     if (!weekOptions.includes(currentWeekNumber)) currentWeekNumber = weekOptions[0];
 
-    const { data: students, error } = await supabaseClient
+    // If this subject is department-specific, only students in that
+    // department appear here - a Social Science student simply won't
+    // show up in a Physics score sheet, and vice versa.
+    let studentsQuery = supabaseClient
         .from('students')
         .select('id, full_name, admission_number')
         .eq('class_id', classId);
+    if (subjectDepartmentId) {
+        studentsQuery = studentsQuery.eq('department_id', subjectDepartmentId);
+    }
+    const { data: students, error } = await studentsQuery;
 
     if (error) {
-        area.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
+        area.innerHTML = `${headerHtml}<p style="color:red;">Error: ${error.message}</p>`;
         return;
     }
 
     if (!students || students.length === 0) {
-        area.innerHTML = `<p>No students found in this class.</p>`;
+        area.innerHTML = `
+            ${headerHtml}
+            <div class="glass-card" style="text-align:center;">
+                <p>No students found${subjectDepartmentName ? ` in ${subjectDepartmentName} department` : ''} for this class.</p>
+                ${subjectDepartmentName ? '<p style="font-size:0.85rem; color:#6b3a2a;">Students need a department assigned under Manage Students for them to appear here.</p>' : ''}
+            </div>
+        `;
         return;
     }
 
     let html = `
+        ${headerHtml}
         <h4>Enter Weekly Scores</h4>
         <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.8rem;">
             <label for="weeklyScoreWeekSelect" style="font-weight:600; margin:0;">Week:</label>
@@ -3116,7 +3211,8 @@ async function loadStudentsForSubject(subjectId, classId) {
                 <td style="padding:8px;">
                     <input type="number" min="0" max="100" value="${score}" 
                            style="width:80px; padding:4px;" 
-                           id="score_${student.id}" />
+                           id="score_${student.id}"
+                           data-student-name="${student.full_name.replace(/"/g, '&quot;')}" />
                 </td>
             </tr>
         `;
@@ -3169,6 +3265,7 @@ async function saveAllWeeklyScores(subjectId) {
     }
 
     const rowsToSave = [];
+    const missingStudentNames = [];
     let invalidCount = 0;
 
     inputs.forEach(input => {
@@ -3176,8 +3273,12 @@ async function saveAllWeeklyScores(subjectId) {
         const rawValue = input.value.trim();
 
         // Skip blanks entirely - don't save a 0 for a student the
-        // teacher simply hasn't entered a score for yet.
-        if (rawValue === '') return;
+        // teacher simply hasn't entered a score for yet. But DO track
+        // who they are, so we can warn about it below.
+        if (rawValue === '') {
+            missingStudentNames.push(input.dataset.studentName || 'Unknown student');
+            return;
+        }
 
         const studentId = parseInt(input.id.replace('score_', ''));
         const score = parseInt(rawValue);
@@ -3203,11 +3304,31 @@ async function saveAllWeeklyScores(subjectId) {
         return;
     }
 
-    if (rowsToSave.length === 0) {
+    if (rowsToSave.length === 0 && missingStudentNames.length > 0) {
         statusEl.textContent = '⚠️ No scores entered yet - fill in at least one before saving.';
         statusEl.style.color = '#d79b00';
         return;
     }
+
+    // Warn about any students left blank, listed by name, BEFORE saving -
+    // this is the actual moment a teacher can still catch and fix it,
+    // rather than it only surfacing later when someone notices a student
+    // missing from a report.
+    if (missingStudentNames.length > 0) {
+        const proceed = confirm(
+            `${missingStudentNames.length} student(s) have NO score entered:\n\n` +
+            missingStudentNames.map(n => `• ${n}`).join('\n') +
+            `\n\nDo you want to save the ${rowsToSave.length} score(s) you DID enter, and leave these students without a score for now?`
+        );
+        if (!proceed) {
+            statusEl.textContent = '⏸️ Save cancelled - go back and fill in the missing scores.';
+            statusEl.style.color = '#d79b00';
+            return;
+        }
+    }
+
+    statusEl.textContent = '⏳ Saving...';
+    statusEl.style.color = '#1a3c5e';
 
     const { error } = await supabaseClient
         .from('weekly_test_results')
@@ -4194,7 +4315,7 @@ async function loadStudentWeeklyAverages() {
             html += `
                 <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem;">
                     <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
-                    <div style="font-size:1.5rem; font-weight:bold; color:${color};">${avg.toFixed(1)}%</div>
+                    <div style="font-size:1.5rem; font-weight:bold; color:${color};">${Math.round(avg)}%</div>
                     <div style="font-size:0.75rem; color:#999;">${byWeek[week].length} subject${byWeek[week].length === 1 ? '' : 's'}</div>
                 </div>
             `;
@@ -4540,10 +4661,121 @@ async function loadAdminOverviewStats() {
 // ============================================================
 async function loadWeeklyScheduleClasses() {
     const select = document.getElementById('scheduleClassSelect');
-    if (!select) return;
+    const missingScoresSelect = document.getElementById('missingScoresClassSelect');
     const { data: classes } = await supabaseClient.from('classes').select('id, name').order('name');
-    select.innerHTML = '<option value="">Select a class...</option>' +
+    const optionsHtml = '<option value="">Select a class...</option>' +
         (classes || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
+    if (select) select.innerHTML = optionsHtml;
+    if (missingScoresSelect) missingScoresSelect.innerHTML = optionsHtml;
+}
+
+// ============================================================
+// MISSING SCORES CHECK (admin) - for a given class/week/term,
+// shows exactly which students are missing a score for any
+// subject that's been APPROVED for that week (via weekly_test_schedule),
+// grouped by subject so it's obvious which teacher/subject to chase.
+// This is a read-only diagnostic - it doesn't touch any scores.
+// ============================================================
+// ============================================================
+// Shared missing-scores calculation, returning plain data rather
+// than rendering anything - used by the admin's on-screen checker
+// AND by the Publish/Send warnings below, so all three can never
+// disagree about what's actually missing.
+// ============================================================
+async function computeMissingScoresForClass(classId, weekNumber, termId) {
+    const { data: scheduled, error: scheduleError } = await supabaseClient
+        .from('weekly_test_schedule')
+        .select('subject_id, subjects(name)')
+        .eq('class_id', classId)
+        .eq('week_number', weekNumber)
+        .eq('term_id', termId);
+
+    if (scheduleError) return { error: scheduleError, noScheduleYet: false, subjects: [], totalMissingCount: 0 };
+    if (!scheduled || scheduled.length === 0) return { error: null, noScheduleYet: true, subjects: [], totalMissingCount: 0 };
+
+    const { data: students, error: studentsError } = await supabaseClient
+        .from('students')
+        .select('id, full_name, admission_number')
+        .eq('class_id', classId)
+        .order('full_name');
+
+    if (studentsError) return { error: studentsError, noScheduleYet: false, subjects: [], totalMissingCount: 0 };
+    if (!students || students.length === 0) return { error: null, noScheduleYet: false, subjects: [], totalMissingCount: 0, noStudents: true };
+
+    const studentIds = students.map(s => s.id);
+    const { data: existingScores, error: scoresError } = await supabaseClient
+        .from('weekly_test_results')
+        .select('student_id, subject_id')
+        .eq('week_number', weekNumber)
+        .eq('term_id', termId)
+        .in('student_id', studentIds);
+
+    if (scoresError) return { error: scoresError, noScheduleYet: false, subjects: [], totalMissingCount: 0 };
+
+    const existingSet = new Set((existingScores || []).map(e => `${e.student_id}|${e.subject_id}`));
+
+    let totalMissingCount = 0;
+    const subjectsResult = [];
+    scheduled.forEach(sub => {
+        const missingStudents = students.filter(s => !existingSet.has(`${s.id}|${sub.subject_id}`));
+        if (missingStudents.length > 0) {
+            totalMissingCount += missingStudents.length;
+            subjectsResult.push({
+                subjectName: sub.subjects?.name || 'Unknown Subject',
+                missingStudents
+            });
+        }
+    });
+
+    return { error: null, noScheduleYet: false, subjects: subjectsResult, totalMissingCount, totalStudents: students.length };
+}
+
+async function checkMissingScores(classId, weekNumber, termId) {
+    const container = document.getElementById('missingScoresResults');
+    if (!container) return;
+
+    if (!classId || !weekNumber || !termId) {
+        container.innerHTML = '<p style="color:#b91c1c;">Please select a class, week, and term first.</p>';
+        return;
+    }
+
+    container.innerHTML = '<p>⏳ Checking...</p>';
+
+    const result = await computeMissingScoresForClass(classId, weekNumber, termId);
+
+    if (result.error) {
+        container.innerHTML = `<p style="color:red;">Error: ${result.error.message}</p>`;
+        return;
+    }
+
+    if (result.noScheduleYet) {
+        container.innerHTML = '<p>No subjects have been approved for this class in this week yet — check "Weekly Test Schedule" first.</p>';
+        return;
+    }
+
+    if (result.noStudents) {
+        container.innerHTML = '<p>No students found in this class.</p>';
+        return;
+    }
+
+    if (result.totalMissingCount === 0) {
+        container.innerHTML = '<p style="color:#166534; font-weight:bold; text-align:center;">✅ Every student has a score recorded for every approved subject this week!</p>';
+        return;
+    }
+
+    let html = '';
+    result.subjects.forEach(sub => {
+        html += `
+            <div style="margin-bottom:1rem; padding:0.8rem 1rem; border:1px solid #f0d0c0; background:#fff8f5; border-radius:8px;">
+                <strong style="color:#b91c1c;">${sub.subjectName}</strong>
+                <span style="color:#666; font-size:0.85rem;"> — missing for ${sub.missingStudents.length} of ${result.totalStudents} student(s)</span>
+                <ul style="margin:0.5rem 0 0 1.2rem; padding:0;">
+                    ${sub.missingStudents.map(s => `<li>${s.full_name} <span style="color:#999; font-size:0.85rem;">(${s.admission_number})</span></li>`).join('')}
+                </ul>
+            </div>
+        `;
+    });
+    container.innerHTML = html;
 }
 
 async function loadWeeklyScheduleForClassWeek() {
@@ -4710,8 +4942,39 @@ async function loadWeeklyPublishStatus() {
 }
 
 async function toggleWeeklyPublish(classId, weekNumber, termId, publish) {
-    if (publish && !confirm(`Publish Week ${weekNumber} results for this class? Students and parents will immediately be able to see them.`)) return;
-    if (!publish && !confirm(`Unpublish Week ${weekNumber} results? Students and parents will no longer be able to see them.`)) return;
+    if (publish) {
+        // Check for incomplete scores BEFORE publishing - this is the
+        // actual fix for the "published too early" problem: once teachers
+        // finish entering the remaining subjects afterward, the live
+        // student dashboard auto-updates and shows the complete picture,
+        // but any PDF already downloaded or email already sent stays
+        // frozen with the incomplete data forever. Catching it here, before
+        // publish happens, is what actually prevents that mismatch.
+        const summary = await computeMissingScoresForClass(classId, weekNumber, termId);
+
+        if (summary.error) {
+            alert('Error checking for missing scores: ' + summary.error.message);
+            return;
+        }
+
+        if (summary.totalMissingCount > 0) {
+            const subjectLines = summary.subjects
+                .map(s => `• ${s.subjectName}: missing for ${s.missingStudents.length} student(s)`)
+                .join('\n');
+            const proceed = confirm(
+                `⚠️ This class still has INCOMPLETE scores for Week ${weekNumber}:\n\n${subjectLines}\n\n` +
+                `If you publish now, any student missing a subject score will show a LOWER average than they should (that subject won't count until it's entered). ` +
+                `The dashboard will self-correct automatically once the missing scores are added \u2014 but any PDF you've already downloaded or email already sent will NOT update, and will keep showing the incomplete numbers forever.\n\n` +
+                `Recommended: click Cancel, chase up the missing scores first, then publish once everything is complete.\n\n` +
+                `Publish anyway with incomplete scores?`
+            );
+            if (!proceed) return;
+        } else if (!confirm(`Publish Week ${weekNumber} results for this class? Students and parents will immediately be able to see them.`)) {
+            return;
+        }
+    } else if (!confirm(`Unpublish Week ${weekNumber} results? Students and parents will no longer be able to see them.`)) {
+        return;
+    }
 
     const { error } = await supabaseClient
         .from('weekly_results_publish')
@@ -6041,7 +6304,14 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
 
         let classTables = '';
         Object.keys(byClassName).sort().forEach(className => {
-            const classList = byClassName[className].sort((a, b) => a.name.localeCompare(b.name));
+            // Sorted by grade band (Starters -> Outstanding), then alphabetically
+            // within the same band - not alphabetically overall.
+            const classList = byClassName[className].sort((a, b) => {
+                const rankA = getTestGradeRank(getTestGradeLabel(a.percentage));
+                const rankB = getTestGradeRank(getTestGradeLabel(b.percentage));
+                if (rankA !== rankB) return rankA - rankB;
+                return a.name.localeCompare(b.name);
+            });
             classTables += `
                 <div style="margin-bottom:1.5rem;">
                     <h4 style="color:#4a2c1a;">${className}</h4>
@@ -6422,7 +6692,7 @@ async function sendWeeklyResultsToParents(weekNumber, termId, classId, studentId
         return;
     }
 
-    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.textContent = '⏳ Checking for missing scores...';
     statusEl.style.color = '#1a3c5e';
 
     const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
@@ -6450,6 +6720,38 @@ async function sendWeeklyResultsToParents(weekNumber, termId, classId, studentId
         statusEl.style.color = '#d79b00';
         return;
     }
+
+    // Check every class involved for incomplete scores BEFORE sending -
+    // an email sent now is a permanent snapshot that will never update
+    // itself even after the missing scores get entered later, unlike the
+    // parent's own dashboard which recalculates live every time it's viewed.
+    const involvedClassIds = [...new Set(links.map(l => l.students?.class_id).filter(Boolean))];
+    let combinedMissingLines = [];
+    for (const cId of involvedClassIds) {
+        const summary = await computeMissingScoresForClass(cId, weekNumber, termId);
+        if (summary.totalMissingCount > 0) {
+            summary.subjects.forEach(s => {
+                combinedMissingLines.push(`• ${s.subjectName}: missing for ${s.missingStudents.length} student(s)`);
+            });
+        }
+    }
+    if (combinedMissingLines.length > 0) {
+        const proceed = confirm(
+            `⚠️ Week ${weekNumber} still has INCOMPLETE scores in the class(es) you're about to email:\n\n` +
+            combinedMissingLines.join('\n') +
+            `\n\nEmails sent now are a permanent snapshot \u2014 they will show incomplete results forever, even after the missing scores are entered later. Parents won't automatically get an updated email.\n\n` +
+            `Recommended: click Cancel, get the missing scores entered first, then send.\n\n` +
+            `Send anyway with incomplete scores?`
+        );
+        if (!proceed) {
+            statusEl.textContent = '⏸️ Sending cancelled \u2014 missing scores need to be entered first.';
+            statusEl.style.color = '#d79b00';
+            return;
+        }
+    }
+
+    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.style.color = '#1a3c5e';
 
     // Look up each parent's email from public.users
     const parentIds = [...new Set(links.map(l => l.parent_id))];
@@ -6544,7 +6846,7 @@ async function sendWeeklyResultsToStudents(weekNumber, termId, classId, studentI
         return;
     }
 
-    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.textContent = '⏳ Checking for missing scores...';
     statusEl.style.color = '#1a3c5e';
 
     const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
@@ -6569,6 +6871,38 @@ async function sendWeeklyResultsToStudents(weekNumber, termId, classId, studentI
         statusEl.style.color = '#d79b00';
         return;
     }
+
+    // Check every class involved for incomplete scores BEFORE sending -
+    // same reasoning as the parent-email version: a sent email is a
+    // permanent snapshot that never updates, unlike the student's own
+    // live dashboard.
+    const involvedClassIds = [...new Set(students.map(s => s.class_id).filter(Boolean))];
+    let combinedMissingLines = [];
+    for (const cId of involvedClassIds) {
+        const summary = await computeMissingScoresForClass(cId, weekNumber, termId);
+        if (summary.totalMissingCount > 0) {
+            summary.subjects.forEach(s => {
+                combinedMissingLines.push(`• ${s.subjectName}: missing for ${s.missingStudents.length} student(s)`);
+            });
+        }
+    }
+    if (combinedMissingLines.length > 0) {
+        const proceed = confirm(
+            `⚠️ Week ${weekNumber} still has INCOMPLETE scores in the class(es) you're about to email:\n\n` +
+            combinedMissingLines.join('\n') +
+            `\n\nEmails sent now are a permanent snapshot \u2014 they will show incomplete results forever, even after the missing scores are entered later.\n\n` +
+            `Recommended: click Cancel, get the missing scores entered first, then send.\n\n` +
+            `Send anyway with incomplete scores?`
+        );
+        if (!proceed) {
+            statusEl.textContent = '⏸️ Sending cancelled \u2014 missing scores need to be entered first.';
+            statusEl.style.color = '#d79b00';
+            return;
+        }
+    }
+
+    statusEl.textContent = '⏳ Sending emails...';
+    statusEl.style.color = '#1a3c5e';
 
     let sentCount = 0;
     let errorCount = 0;
