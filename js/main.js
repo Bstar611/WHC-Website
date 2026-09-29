@@ -68,7 +68,7 @@ function getGradeColor(grade) {
 // itself is never shown anywhere in that feature, only the label.
 // ============================================================
 function getTestGradeLabel(percentage) {
-    if (percentage >= 90) return 'Outstanding';
+    if (percentage >= 90) return 'Standouts';
     if (percentage >= 70) return 'Champions';
     if (percentage >= 60) return 'Boosters';
     if (percentage >= 40) return 'Movers';
@@ -78,7 +78,7 @@ function getTestGradeLabel(percentage) {
 
 function getTestGradeColor(label) {
     switch (label) {
-        case 'Outstanding': return '#b8860b'; // gold
+        case 'Standouts': return '#b8860b'; // gold
         case 'Champions': return '#166534';   // green
         case 'Boosters': return '#1a3c5e';    // dark blue
         case 'Movers': return '#4a90d9';      // light blue
@@ -91,7 +91,7 @@ function getTestGradeColor(label) {
 // Numeric rank for sorting by band (lowest to highest), since band
 // names alone don't sort in a meaningful order alphabetically.
 function getTestGradeRank(label) {
-    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Outstanding'];
+    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Standouts'];
     const idx = order.indexOf(label);
     return idx === -1 ? order.length : idx;
 }
