@@ -6259,7 +6259,7 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
 // feature from the weekly test SCORE sheet above. Uses the exact
 // same underlying scores/rankings, but converts each student's
 // weekly percentage into a band label (Starters/Climbers/Movers/
-// Boosters/Champions/Outstanding) and NEVER prints the actual
+// Boosters/Champions/Standouts) and NEVER prints the actual
 // percentage or score anywhere in this sheet - only the label.
 // No positions or M1-B5/R1-Z5 labels here either, since this
 // isn't a ranking system - it's a performance band per student.
@@ -6377,7 +6377,7 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
             <p style="text-align:center;">Weekly Test Grades — Week ${weekNumber} | ${termName}</p>
             <p style="text-align:center; font-size:0.85rem; color:#666;">
                 Starters (0-24) &nbsp;·&nbsp; Climbers (25-39) &nbsp;·&nbsp; Movers (40-59) &nbsp;·&nbsp;
-                Boosters (60-69) &nbsp;·&nbsp; Champions (70-89) &nbsp;·&nbsp; Outstanding (90-100)
+                Boosters (60-69) &nbsp;·&nbsp; Champions (70-89) &nbsp;·&nbsp; Standouts (90-100)
             </p>
             <hr>
             ${renderGradeSection('Junior Secondary School', juniorFiltered)}
