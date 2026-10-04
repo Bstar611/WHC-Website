@@ -25,6 +25,26 @@ function showMessage(elId, msg, isError = false) {
 }
 
 // ============================================================
+// Sends ONE email through the admin-only send-email Edge Function.
+// It attaches the signed-in admin's own login session, and the server
+// refuses anyone who isn't a logged-in administrator. (Previously this
+// used the public key, which meant anyone could have used the function.)
+// ============================================================
+async function sendEmailAsAdmin(to, subject, html, signal) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    if (!session) throw new Error('Not signed in');
+    return fetch(`${SUPABASE_URL}/functions/v1/send-email`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`
+        },
+        body: JSON.stringify({ to, subject, html }),
+        signal
+    });
+}
+
+// ============================================================
 // Shared CA (Continuous Assessment) calculation, used EVERYWHERE
 // a subject's CA is computed — report cards, cumulative scores,
 // best graduating students, etc — so it can never drift out of
@@ -1269,29 +1289,16 @@ document.addEventListener('DOMContentLoaded', function() {
             statusEl.textContent = '⏳ Sending message...';
             statusEl.style.color = '#1a3c5e';
 
-            const html = `
-                <h2>📩 New Contact Form Message</h2>
-                <p><strong>Name:</strong> ${name}</p>
-                <p><strong>Email:</strong> ${email}</p>
-                <p><strong>Message:</strong></p>
-                <p>${message}</p>
-                <hr>
-                <p><em>Sent from Wonderhills College contact form</em></p>
-                <p>© 2026 Wonderhills College</p>
-            `;
+            // The server builds and sanitises the email itself and always
+            // sends it to the school's own address - the browser can no
+            // longer choose the recipient or the HTML.
+            const honeypot = document.getElementById('contactWebsite')?.value || '';
 
             try {
-                const response = await fetch('https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email', {
+                const response = await fetch(`${SUPABASE_URL}/functions/v1/contact-form`, {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                    },
-                    body: JSON.stringify({
-                        to: 'wonderhills.sch@gmail.com',
-                        subject: `📩 New Contact Form Message from ${name}`,
-                        html: html
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, message, website: honeypot })
                 });
 
                 if (response.ok) {
@@ -6023,7 +6030,7 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
                 admission: r.students?.admission_number || 'N/A',
                 className: r.students?.classes?.name || 'N/A',
                 classId: r.students?.class_id,
-                section: r.students?.classes?.section || 'Junior',
+                section: r.students?.classes?.section ?? null,
                 scores: []
             };
         }
@@ -6051,6 +6058,10 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
     // in that section combined, using the special top-5 labels.
     const junior = studentList.filter(s => s.section === 'Junior').sort((a, b) => b.percentage - a.percentage);
     const senior = studentList.filter(s => s.section === 'Senior').sort((a, b) => b.percentage - a.percentage);
+    // Anyone whose class section isn't exactly "Junior" or "Senior" used to
+    // be silently dropped (if non-blank) or silently counted as Junior (if
+    // blank) - now surfaced as a loud warning instead of hidden either way.
+    const unrecognized = studentList.filter(s => s.section !== 'Junior' && s.section !== 'Senior');
     junior.forEach((s, i) => { s.groupPosition = i + 1; });
     senior.forEach((s, i) => { s.groupPosition = i + 1; });
 
@@ -6219,6 +6230,30 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
         `;
     }
 
+    // Loud, impossible-to-miss warning if any student's class has a
+    // section value that isn't exactly "Junior" or "Senior" - this is
+    // what used to cause a whole class to silently vanish from this
+    // report (or get miscounted) with no indication anything was wrong.
+    function renderUnrecognizedSectionWarning(list) {
+        if (!list || list.length === 0) return '';
+        const byClass = {};
+        list.forEach(s => {
+            const key = s.className || 'Unknown class';
+            if (!byClass[key]) byClass[key] = { count: 0, section: s.section };
+            byClass[key].count++;
+        });
+        const rows = Object.entries(byClass)
+            .map(([className, info]) => `<li><strong>${className}</strong> — ${info.count} student(s) — section is currently: <code>${info.section === null ? '(blank/NULL)' : `"${info.section}"`}</code></li>`)
+            .join('');
+        return `
+            <div style="border:3px solid #b91c1c; background:#fff5f5; padding:1rem 1.2rem; border-radius:8px; margin-bottom:1.5rem;">
+                <strong style="color:#b91c1c; font-size:1.05rem;">⚠️ ${list.length} student(s) excluded from this report</strong>
+                <p style="margin:0.5rem 0;">Their class's "Section" field isn't set to exactly <code>Junior</code> or <code>Senior</code>, so they can't be placed in either part of this sheet. Fix this under <strong>Manage Classes</strong> by editing the affected class's section, then regenerate this report.</p>
+                <ul style="margin:0.5rem 0 0 1.2rem; padding:0;">${rows}</ul>
+            </div>
+        `;
+    }
+
     const printWindow = window.open('', '_blank');
     printWindow.document.write(`
         <html>
@@ -6230,6 +6265,7 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
                 th { background: #4a2c1a; color: white; padding: 8px; text-align: left; }
                 td { padding: 8px; border-bottom: 1px solid #ddd; }
                 hr { border: 1px solid #d4a373; margin: 1rem 0; }
+                code { background: #eee; padding: 0.1rem 0.4rem; border-radius: 4px; }
                 @media print { body { padding: 0; } }
             </style>
         </head>
@@ -6237,6 +6273,7 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
             <h2 style="text-align:center; color:#4a2c1a;">Wonderhills College</h2>
             <p style="text-align:center;">Weekly Test Result Sheet — Week ${weekNumber} | ${termName}</p>
             <hr>
+            ${renderUnrecognizedSectionWarning(unrecognized)}
             ${renderJuniorClassByClass(junior)}
             ${renderSeniorClassByClass(senior)}
             ${renderTop5Page(junior, 'Junior Secondary School', 'Junior')}
@@ -6259,7 +6296,7 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
 // feature from the weekly test SCORE sheet above. Uses the exact
 // same underlying scores/rankings, but converts each student's
 // weekly percentage into a band label (Starters/Climbers/Movers/
-// Boosters/Champions/Standouts) and NEVER prints the actual
+// Boosters/Champions/Outstanding) and NEVER prints the actual
 // percentage or score anywhere in this sheet - only the label.
 // No positions or M1-B5/R1-Z5 labels here either, since this
 // isn't a ranking system - it's a performance band per student.
@@ -6277,7 +6314,7 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
     const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
     const termName = termRow?.name || `Term ${termId}`;
 
-    const { junior, senior, error } = await computeWeeklyRankings(weekNumber, termId);
+    const { junior, senior, unrecognized, error } = await computeWeeklyRankings(weekNumber, termId);
 
     if (error) {
         statusEl.textContent = '❌ Error: ' + error.message;
@@ -6297,11 +6334,17 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
 
     const juniorFiltered = applyFilters(junior);
     const seniorFiltered = applyFilters(senior);
+    const unrecognizedFiltered = applyFilters(unrecognized);
 
-    if (juniorFiltered.length === 0 && seniorFiltered.length === 0) {
+    if (juniorFiltered.length === 0 && seniorFiltered.length === 0 && unrecognizedFiltered.length === 0) {
         statusEl.textContent = '⚠️ No scores recorded for that week / selection yet.';
         statusEl.style.color = '#d79b00';
         return;
+    }
+
+    if (juniorFiltered.length === 0 && seniorFiltered.length === 0 && unrecognizedFiltered.length > 0) {
+        statusEl.textContent = `⚠️ Found ${unrecognizedFiltered.length} score(s), but this class's "Section" field isn't set to Junior or Senior, so it can't be placed in the report. See the warning in the generated sheet for details.`;
+        statusEl.style.color = '#b91c1c';
     }
 
     function renderGradeSection(title, list) {
@@ -6359,6 +6402,26 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
     }
 
     const printWindow = window.open('', '_blank');
+    function renderUnrecognizedSectionWarning(list) {
+        if (!list || list.length === 0) return '';
+        const byClass = {};
+        list.forEach(s => {
+            const key = s.className || 'Unknown class';
+            if (!byClass[key]) byClass[key] = { count: 0, section: s.section };
+            byClass[key].count++;
+        });
+        const rows = Object.entries(byClass)
+            .map(([className, info]) => `<li><strong>${className}</strong> — ${info.count} student(s) — section is currently: <code>${info.section === null ? '(blank/NULL)' : `"${info.section}"`}</code></li>`)
+            .join('');
+        return `
+            <div style="border:3px solid #b91c1c; background:#fff5f5; padding:1rem 1.2rem; border-radius:8px; margin-bottom:1.5rem;">
+                <strong style="color:#b91c1c; font-size:1.05rem;">⚠️ ${list.length} student(s) excluded from this report</strong>
+                <p style="margin:0.5rem 0;">Their class's "Section" field isn't set to exactly <code>Junior</code> or <code>Senior</code>, so they can't be placed in either part of this sheet. Fix this under <strong>Manage Classes</strong> by editing the affected class's section, then regenerate this report.</p>
+                <ul style="margin:0.5rem 0 0 1.2rem; padding:0;">${rows}</ul>
+            </div>
+        `;
+    }
+
     printWindow.document.write(`
         <html>
         <head>
@@ -6369,6 +6432,7 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
                 th { background: #4a2c1a; color: white; padding: 8px; text-align: left; }
                 td { padding: 8px; border-bottom: 1px solid #ddd; }
                 hr { border: 1px solid #d4a373; margin: 1rem 0; }
+                code { background: #eee; padding: 0.1rem 0.4rem; border-radius: 4px; }
                 @media print { body { padding: 0; } }
             </style>
         </head>
@@ -6377,9 +6441,10 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
             <p style="text-align:center;">Weekly Test Grades — Week ${weekNumber} | ${termName}</p>
             <p style="text-align:center; font-size:0.85rem; color:#666;">
                 Starters (0-24) &nbsp;·&nbsp; Climbers (25-39) &nbsp;·&nbsp; Movers (40-59) &nbsp;·&nbsp;
-                Boosters (60-69) &nbsp;·&nbsp; Champions (70-89) &nbsp;·&nbsp; Standouts (90-100)
+                Boosters (60-69) &nbsp;·&nbsp; Champions (70-89) &nbsp;·&nbsp; Outstanding (90-100)
             </p>
             <hr>
+            ${renderUnrecognizedSectionWarning(unrecognizedFiltered)}
             ${renderGradeSection('Junior Secondary School', juniorFiltered)}
             ${renderGradeSection('Senior Secondary School', seniorFiltered)}
             <p style="text-align:center; margin-top:20px;">© 2026 Wonderhills College</p>
@@ -6391,8 +6456,10 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
     `);
     printWindow.document.close();
 
-    statusEl.textContent = '✅ Weekly Test Grades sheet opened in a new tab.';
-    statusEl.style.color = '#166534';
+    if (!statusEl.textContent.includes('Section')) {
+        statusEl.textContent = '✅ Weekly Test Grades sheet opened in a new tab.';
+        statusEl.style.color = '#166534';
+    }
 }
 
 // ============================================================
@@ -6422,8 +6489,8 @@ async function computeWeeklyRankings(weekNumber, termId) {
         .eq('week_number', weekNumber)
         .eq('term_id', termId);
 
-    if (error) return { junior: [], senior: [], error };
-    if (!results || results.length === 0) return { junior: [], senior: [], error: null };
+    if (error) return { junior: [], senior: [], unrecognized: [], error };
+    if (!results || results.length === 0) return { junior: [], senior: [], unrecognized: [], error: null };
 
     const studentMap = {};
     results.forEach(r => {
@@ -6435,7 +6502,14 @@ async function computeWeeklyRankings(weekNumber, termId) {
                 admission: r.students?.admission_number || 'N/A',
                 className: r.students?.classes?.name || 'N/A',
                 classId: r.students?.class_id,
-                section: r.students?.classes?.section || 'Junior',
+                // No silent default here on purpose. A class with a blank,
+                // misspelled, or otherwise non-matching section value used
+                // to get quietly counted as "Junior" (if blank/falsy) or
+                // dropped from every report entirely (if it was some other
+                // non-empty string) - either way, invisibly. Now it's kept
+                // as whatever the raw value actually is, so it can be
+                // caught and reported below instead of hidden.
+                section: r.students?.classes?.section ?? null,
                 scores: []
             };
         }
@@ -6460,10 +6534,13 @@ async function computeWeeklyRankings(weekNumber, termId) {
 
     const junior = studentList.filter(s => s.section === 'Junior').sort((a, b) => b.percentage - a.percentage);
     const senior = studentList.filter(s => s.section === 'Senior').sort((a, b) => b.percentage - a.percentage);
+    // Anyone whose class section isn't exactly "Junior" or "Senior" lands
+    // here instead of being silently dropped or silently misclassified.
+    const unrecognized = studentList.filter(s => s.section !== 'Junior' && s.section !== 'Senior');
     junior.forEach((s, i) => { s.groupPosition = i + 1; });
     senior.forEach((s, i) => { s.groupPosition = i + 1; });
 
-    return { junior, senior, error: null };
+    return { junior, senior, unrecognized, error: null };
 }
 
 // Fetches an image (logo/signature) and converts it to a base64 data URL
@@ -6706,7 +6783,6 @@ async function sendWeeklyResultsToParents(weekNumber, termId, classId, studentId
     statusEl.textContent = '⏳ Checking for missing scores...';
     statusEl.style.color = '#1a3c5e';
 
-    const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
 
     let linksQuery = supabaseClient
         .from('parent_children')
@@ -6817,19 +6893,7 @@ async function sendWeeklyResultsToParents(weekNumber, termId, classId, studentId
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const response = await fetch(EDGE_FUNCTION_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({
-                    to: parentEmail,
-                    subject: subject,
-                    html: html
-                }),
-                signal: controller.signal
-            });
+            const response = await sendEmailAsAdmin(parentEmail, subject, html, controller.signal);
             clearTimeout(timeoutId);
 
             if (response.ok) sentCount++;
@@ -6860,7 +6924,6 @@ async function sendWeeklyResultsToStudents(weekNumber, termId, classId, studentI
     statusEl.textContent = '⏳ Checking for missing scores...';
     statusEl.style.color = '#1a3c5e';
 
-    const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
 
     let studentQuery = supabaseClient
         .from('students')
@@ -6954,15 +7017,7 @@ async function sendWeeklyResultsToStudents(weekNumber, termId, classId, studentI
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const response = await fetch(EDGE_FUNCTION_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({ to: student.email, subject: subject, html: html }),
-                signal: controller.signal
-            });
+            const response = await sendEmailAsAdmin(student.email, subject, html, controller.signal);
             clearTimeout(timeoutId);
 
             if (response.ok) sentCount++;
@@ -6986,7 +7041,6 @@ async function sendCumulativeResultsToStudents(termId, classId, studentIds) {
     statusEl.textContent = '⏳ Sending emails...';
     statusEl.style.color = '#1a3c5e';
 
-    const EDGE_FUNCTION_URL = 'https://tfradfxljdfcjenpuoxt.supabase.co/functions/v1/send-email';
 
     const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
     const termName = termRow?.name || `Term ${termId}`;
@@ -7059,15 +7113,7 @@ async function sendCumulativeResultsToStudents(termId, classId, studentIds) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 15000);
 
-            const response = await fetch(EDGE_FUNCTION_URL, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
-                },
-                body: JSON.stringify({ to: student.email, subject: subject, html: html }),
-                signal: controller.signal
-            });
+            const response = await sendEmailAsAdmin(student.email, subject, html, controller.signal);
             clearTimeout(timeoutId);
 
             if (response.ok) sentCount++;
