@@ -88,7 +88,7 @@ function getGradeColor(grade) {
 // itself is never shown anywhere in that feature, only the label.
 // ============================================================
 function getTestGradeLabel(percentage) {
-    if (percentage >= 90) return 'Standouts';
+    if (percentage >= 90) return 'Outstanding';
     if (percentage >= 70) return 'Champions';
     if (percentage >= 60) return 'Boosters';
     if (percentage >= 40) return 'Movers';
@@ -98,7 +98,7 @@ function getTestGradeLabel(percentage) {
 
 function getTestGradeColor(label) {
     switch (label) {
-        case 'Standouts': return '#b8860b'; // gold
+        case 'Outstanding': return '#b8860b'; // gold
         case 'Champions': return '#166534';   // green
         case 'Boosters': return '#1a3c5e';    // dark blue
         case 'Movers': return '#4a90d9';      // light blue
@@ -111,7 +111,7 @@ function getTestGradeColor(label) {
 // Numeric rank for sorting by band (lowest to highest), since band
 // names alone don't sort in a meaningful order alphabetically.
 function getTestGradeRank(label) {
-    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Standouts'];
+    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Outstanding'];
     const idx = order.indexOf(label);
     return idx === -1 ? order.length : idx;
 }
@@ -1232,6 +1232,7 @@ document.addEventListener('DOMContentLoaded', function() {
         loadAcademicYears();
         loadTimetableManagerClasses();
         loadWeeklyScheduleClasses();
+        loadSubjectEnrollmentClasses();
         loadPromoteClassDropdowns();
         populateReportFilterClasses();
         loadAdminOverviewStats();
@@ -2245,7 +2246,7 @@ let selectedYearIdForTerm = null;
 // empty this whole time, regardless of what you selected.
 async function populateReportFilterClasses() {
     const { data: classes } = await supabaseClient.from('classes').select('id, name').order('name');
-    ['reportClassFilter', 'emailClassFilter', 'studentEmailClassFilter'].forEach(id => {
+    ['reportClassFilter', 'emailClassFilter', 'studentEmailClassFilter', 'gradeComparisonClassFilter'].forEach(id => {
         const select = document.getElementById(id);
         if (!select) return;
         select.innerHTML = '<option value="">All Classes</option>' +
@@ -2321,7 +2322,7 @@ async function populateStudentEmailStudentFilter() {
 
 function populateTermDropdowns(terms) {
     const activeTerm = terms.find(t => t.is_active) || terms[0];
-    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect', 'certificateTermSelect', 'missingScoresTermSelect'].forEach(selectId => {
+    ['reportTermSelect', 'emailTermSelect', 'studentEmailTermSelect', 'certificateTermSelect', 'missingScoresTermSelect', 'gradeComparisonTermSelect'].forEach(selectId => {
         const select = document.getElementById(selectId);
         if (!select) return;
         select.innerHTML = terms.map(t =>
@@ -3152,11 +3153,20 @@ async function loadStudentsForSubject(subjectId, classId, subjectName, className
     if (subjectDepartmentId) {
         studentsQuery = studentsQuery.eq('department_id', subjectDepartmentId);
     }
-    const { data: students, error } = await studentsQuery;
+    let { data: students, error } = await studentsQuery;
 
     if (error) {
         area.innerHTML = `${headerHtml}<p style="color:red;">Error: ${error.message}</p>`;
         return;
+    }
+
+    // If this subject has an explicit enrollment list (set under Subject
+    // Enrollment), narrow further to only the students actually enrolled -
+    // not every student in the department necessarily offers every
+    // subject in it.
+    const enrolledSet = await getExplicitEnrollment(subjectId);
+    if (enrolledSet) {
+        students = (students || []).filter(s => enrolledSet.has(s.id));
     }
 
     if (!students || students.length === 0) {
@@ -3164,7 +3174,7 @@ async function loadStudentsForSubject(subjectId, classId, subjectName, className
             ${headerHtml}
             <div class="glass-card" style="text-align:center;">
                 <p>No students found${subjectDepartmentName ? ` in ${subjectDepartmentName} department` : ''} for this class.</p>
-                ${subjectDepartmentName ? '<p style="font-size:0.85rem; color:#6b3a2a;">Students need a department assigned under Manage Students for them to appear here.</p>' : ''}
+                ${subjectDepartmentName ? '<p style="font-size:0.85rem; color:#6b3a2a;">Students need a department assigned under Manage Students for them to appear here, or an enrollment list under Subject Enrollment may be excluding everyone.</p>' : '<p style="font-size:0.85rem; color:#6b3a2a;">Check this subject\'s enrollment list under Subject Enrollment.</p>'}
             </div>
         `;
         return;
@@ -4669,11 +4679,274 @@ async function loadAdminOverviewStats() {
 async function loadWeeklyScheduleClasses() {
     const select = document.getElementById('scheduleClassSelect');
     const missingScoresSelect = document.getElementById('missingScoresClassSelect');
+    const enrollmentSelect = document.getElementById('enrollmentClassSelect');
     const { data: classes } = await supabaseClient.from('classes').select('id, name').order('name');
     const optionsHtml = '<option value="">Select a class...</option>' +
         (classes || []).map(c => `<option value="${c.id}">${c.name}</option>`).join('');
     if (select) select.innerHTML = optionsHtml;
     if (missingScoresSelect) missingScoresSelect.innerHTML = optionsHtml;
+    if (enrollmentSelect) enrollmentSelect.innerHTML = optionsHtml;
+}
+
+// ============================================================
+// SUBJECT ENROLLMENT (per-student override on top of department)
+// A subject with NO rows in student_subjects at all is "open to
+// everyone" (department-filtered, same as before) - nothing changes
+// for subjects you haven't configured this way. The moment you save
+// an enrollment list for a subject (even with everyone checked),
+// that subject switches to explicit mode: only students with a row
+// here are considered to offer it, from then on. This affects both
+// the teacher's score-entry list and the Missing Scores check.
+// ============================================================
+async function onEnrollmentClassChange() {
+    const classId = document.getElementById('enrollmentClassSelect').value;
+    const subjectSelect = document.getElementById('enrollmentSubjectSelect');
+    const checklistContainer = document.getElementById('enrollmentChecklist');
+    if (checklistContainer) checklistContainer.innerHTML = '';
+
+    if (!classId) {
+        subjectSelect.innerHTML = '<option value="">Select a class first</option>';
+        return;
+    }
+
+    const { data: subjects } = await supabaseClient
+        .from('subjects')
+        .select('id, name, department_id, departments(name)')
+        .eq('class_id', classId)
+        .order('name');
+
+    subjectSelect.innerHTML = '<option value="">Select a subject...</option>' +
+        (subjects || []).map(s => `<option value="${s.id}">${s.name}${s.departments?.name ? ` (${s.departments.name})` : ''}</option>`).join('');
+}
+
+async function loadSubjectEnrollmentChecklist() {
+    const classId = document.getElementById('enrollmentClassSelect').value;
+    const subjectId = document.getElementById('enrollmentSubjectSelect').value;
+    const container = document.getElementById('enrollmentChecklist');
+    if (!container) return;
+
+    if (!classId || !subjectId) {
+        container.innerHTML = '';
+        return;
+    }
+
+    container.innerHTML = '<p>⏳ Loading...</p>';
+
+    const { data: subjectRow } = await supabaseClient
+        .from('subjects')
+        .select('department_id, departments(name)')
+        .eq('id', subjectId)
+        .maybeSingle();
+    const subjectDepartmentId = subjectRow?.department_id || null;
+    const subjectDepartmentName = subjectRow?.departments?.name || null;
+
+    let studentsQuery = supabaseClient
+        .from('students')
+        .select('id, full_name, admission_number')
+        .eq('class_id', classId)
+        .order('full_name');
+    if (subjectDepartmentId) {
+        studentsQuery = studentsQuery.eq('department_id', subjectDepartmentId);
+    }
+    const { data: students, error } = await studentsQuery;
+
+    if (error) {
+        container.innerHTML = `<p style="color:red;">Error: ${error.message}</p>`;
+        return;
+    }
+
+    if (!students || students.length === 0) {
+        container.innerHTML = `<p>No students found${subjectDepartmentName ? ` in ${subjectDepartmentName} department` : ''} for this class.</p>`;
+        return;
+    }
+
+    const { data: existingEnrollment } = await supabaseClient
+        .from('student_subjects')
+        .select('student_id')
+        .eq('subject_id', subjectId);
+
+    const hasExplicitEnrollment = (existingEnrollment || []).length > 0;
+    const enrolledSet = new Set((existingEnrollment || []).map(e => e.student_id));
+
+    let html = `
+        <p style="font-size:0.85rem; color:#666;">
+            ${hasExplicitEnrollment
+                ? 'This subject already has an explicit enrollment list — only checked students are counted as offering it.'
+                : 'No enrollment list set yet for this subject — everyone below is currently treated as offering it. Uncheck anyone who does NOT take it, then save.'}
+        </p>
+    `;
+    students.forEach(s => {
+        const isChecked = hasExplicitEnrollment ? enrolledSet.has(s.id) : true;
+        html += `
+            <label style="display:block; padding:0.3rem 0;">
+                <input type="checkbox" id="enroll_${s.id}" ${isChecked ? 'checked' : ''} style="width:18px; height:18px; margin-right:0.5rem;">
+                ${s.full_name} <span style="color:#999; font-size:0.85rem;">(${s.admission_number})</span>
+            </label>
+        `;
+    });
+    html += `
+        <button onclick="saveSubjectEnrollment(${subjectId})" class="btn-primary" style="margin-top:1rem; border:none; cursor:pointer; padding:0.6rem 1.5rem;">Save Enrollment</button>
+        <div id="enrollmentStatus" style="margin-top:0.8rem; font-weight:bold;"></div>
+    `;
+    container.innerHTML = html;
+    container.dataset.studentIds = students.map(s => s.id).join(',');
+}
+
+async function saveSubjectEnrollment(subjectId) {
+    const statusEl = document.getElementById('enrollmentStatus');
+    const container = document.getElementById('enrollmentChecklist');
+    const studentIds = container.dataset.studentIds.split(',').map(Number);
+
+    statusEl.textContent = '⏳ Saving...';
+    statusEl.style.color = '#1a3c5e';
+
+    const enrolled = [];
+    const notEnrolled = [];
+    studentIds.forEach(studentId => {
+        const checkbox = document.getElementById(`enroll_${studentId}`);
+        if (checkbox?.checked) enrolled.push(studentId);
+        else notEnrolled.push(studentId);
+    });
+
+    // Clear any existing rows for this subject among these students, then
+    // re-insert exactly the currently-checked set - simplest way to make
+    // this idempotent regardless of what was saved before.
+    const { error: deleteError } = await supabaseClient
+        .from('student_subjects')
+        .delete()
+        .eq('subject_id', subjectId)
+        .in('student_id', studentIds);
+
+    if (deleteError) {
+        statusEl.textContent = '❌ Error: ' + deleteError.message;
+        statusEl.style.color = '#b91c1c';
+        return;
+    }
+
+    if (enrolled.length > 0) {
+        const { error: insertError } = await supabaseClient
+            .from('student_subjects')
+            .insert(enrolled.map(studentId => ({ student_id: studentId, subject_id: subjectId })));
+
+        if (insertError) {
+            statusEl.textContent = '❌ Error: ' + insertError.message;
+            statusEl.style.color = '#b91c1c';
+            return;
+        }
+    }
+
+    statusEl.textContent = `✅ Saved! ${enrolled.length} student(s) offer this subject, ${notEnrolled.length} do not.`;
+    statusEl.style.color = '#166534';
+}
+
+// Returns the explicit enrollment set for a subject, or null if the
+// subject has no explicit list yet (meaning "everyone eligible offers
+// it" - the caller should apply no extra filtering in that case).
+async function getExplicitEnrollment(subjectId) {
+    const { data } = await supabaseClient
+        .from('student_subjects')
+        .select('student_id')
+        .eq('subject_id', subjectId);
+    if (!data || data.length === 0) return null;
+    return new Set(data.map(e => e.student_id));
+}
+
+// ============================================================
+// TEST GRADE CHANGES (week-over-week)
+// Compares each student's Test Grade band between the chosen week
+// and the week immediately before it, grouping results into
+// Improved / Declined / Unchanged. Students missing a score in
+// either week simply aren't compared (nothing to compare against).
+// ============================================================
+async function compareWeeklyTestGrades(weekNumber, termId, classId) {
+    const container = document.getElementById('gradeComparisonResults');
+    if (!container) return;
+
+    if (!termId) {
+        container.innerHTML = '<p style="color:#b91c1c;">Please select a term.</p>';
+        return;
+    }
+    if (!weekNumber || weekNumber < 2) {
+        container.innerHTML = '<p style="color:#b91c1c;">Please choose a week of 2 or higher — there\'s no earlier week to compare Week 1 against.</p>';
+        return;
+    }
+
+    container.innerHTML = '<p>⏳ Comparing...</p>';
+
+    const previousWeek = weekNumber - 1;
+
+    const [currentData, previousData] = await Promise.all([
+        computeWeeklyRankings(weekNumber, termId),
+        computeWeeklyRankings(previousWeek, termId)
+    ]);
+
+    if (currentData.error || previousData.error) {
+        const err = currentData.error || previousData.error;
+        container.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+        return;
+    }
+
+    function flatten(data) {
+        return [...data.junior, ...data.senior, ...(data.unrecognized || [])];
+    }
+
+    let currentList = flatten(currentData);
+    let previousList = flatten(previousData);
+
+    if (classId) {
+        const cId = parseInt(classId);
+        currentList = currentList.filter(s => s.classId === cId);
+        previousList = previousList.filter(s => s.classId === cId);
+    }
+
+    const previousMap = {};
+    previousList.forEach(s => { previousMap[s.studentId] = s; });
+
+    const improved = [];
+    const declined = [];
+    let unchangedCount = 0;
+
+    currentList.forEach(curr => {
+        const prev = previousMap[curr.studentId];
+        if (!prev) return; // no previous-week score to compare against
+
+        const currLabel = getTestGradeLabel(curr.percentage);
+        const prevLabel = getTestGradeLabel(prev.percentage);
+        const currRank = getTestGradeRank(currLabel);
+        const prevRank = getTestGradeRank(prevLabel);
+
+        const entry = { name: curr.name, className: curr.className, prevLabel, currLabel };
+        if (currRank > prevRank) improved.push(entry);
+        else if (currRank < prevRank) declined.push(entry);
+        else unchangedCount++;
+    });
+
+    improved.sort((a, b) => a.name.localeCompare(b.name));
+    declined.sort((a, b) => a.name.localeCompare(b.name));
+
+    if (improved.length === 0 && declined.length === 0 && unchangedCount === 0) {
+        container.innerHTML = `<p>No students have scores recorded in both Week ${previousWeek} and Week ${weekNumber} yet, so there's nothing to compare.</p>`;
+        return;
+    }
+
+    let html = `<p style="color:#666; font-size:0.9rem;">Comparing Week ${previousWeek} → Week ${weekNumber}. ${improved.length} improved, ${declined.length} declined, ${unchangedCount} unchanged (students without a score in both weeks aren't shown).</p>`;
+
+    html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:1.5rem; margin-top:1rem;">`;
+
+    html += `<div><h4 style="color:#166534;">📈 Improved (${improved.length})</h4>`;
+    html += improved.length === 0
+        ? `<p style="color:#999;">None.</p>`
+        : `<ul style="padding-left:1.2rem; margin:0;">${improved.map(e => `<li style="margin-bottom:0.3rem;"><strong>${e.name}</strong> <span style="color:#999; font-size:0.85rem;">(${e.className})</span><br>${e.prevLabel} → <span style="color:#166534; font-weight:bold;">${e.currLabel}</span></li>`).join('')}</ul>`;
+    html += `</div>`;
+
+    html += `<div><h4 style="color:#b91c1c;">📉 Declined (${declined.length})</h4>`;
+    html += declined.length === 0
+        ? `<p style="color:#999;">None.</p>`
+        : `<ul style="padding-left:1.2rem; margin:0;">${declined.map(e => `<li style="margin-bottom:0.3rem;"><strong>${e.name}</strong> <span style="color:#999; font-size:0.85rem;">(${e.className})</span><br>${e.prevLabel} → <span style="color:#b91c1c; font-weight:bold;">${e.currLabel}</span></li>`).join('')}</ul>`;
+    html += `</div>`;
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 // ============================================================
@@ -4721,6 +4994,21 @@ async function computeMissingScoresForClass(classId, weekNumber, termId) {
 
     const existingSet = new Set((existingScores || []).map(e => `${e.student_id}|${e.subject_id}`));
 
+    // Batch-fetch explicit enrollment for every scheduled subject at once
+    // (rather than one query per subject in the loop below). A subject
+    // with no rows here at all is "open to everyone eligible" - unchanged
+    // from before.
+    const scheduledSubjectIds = scheduled.map(sub => sub.subject_id);
+    const { data: enrollmentRows } = await supabaseClient
+        .from('student_subjects')
+        .select('student_id, subject_id')
+        .in('subject_id', scheduledSubjectIds);
+    const enrollmentBySubject = {};
+    (enrollmentRows || []).forEach(e => {
+        if (!enrollmentBySubject[e.subject_id]) enrollmentBySubject[e.subject_id] = new Set();
+        enrollmentBySubject[e.subject_id].add(e.student_id);
+    });
+
     let totalMissingCount = 0;
     const subjectsResult = [];
     scheduled.forEach(sub => {
@@ -4730,9 +5018,16 @@ async function computeMissingScoresForClass(classId, weekNumber, termId) {
         // counted as "missing" one. Core subjects (no department) apply to
         // everyone in the class, as before.
         const subjectDepartmentId = sub.subjects?.department_id || null;
-        const applicableStudents = subjectDepartmentId
+        let applicableStudents = subjectDepartmentId
             ? students.filter(s => s.department_id === subjectDepartmentId)
             : students;
+
+        // Further narrow to an explicit per-student enrollment list, if
+        // one has been set for this subject under Subject Enrollment.
+        const enrolledSet = enrollmentBySubject[sub.subject_id];
+        if (enrolledSet) {
+            applicableStudents = applicableStudents.filter(s => enrolledSet.has(s.id));
+        }
 
         const missingStudents = applicableStudents.filter(s => !existingSet.has(`${s.id}|${sub.subject_id}`));
         if (missingStudents.length > 0) {
@@ -5691,49 +5986,48 @@ async function loadBestGraduatingStudents(classId) {
 
     const studentIds = students.map(s => s.id);
 
-    const { data: allWeekly } = await supabaseClient
+    // A plain, literal average of EVERY weekly test score a student has
+    // ever recorded, across every subject and every term - a straight
+    // percentage, exactly as entered (0-100).
+    //
+    // The PREVIOUS version here scaled each subject's weekly scores down
+    // to a 25-point "CA" (continuous assessment) and added an exam score
+    // capped at 75 - the same formula the report card uses for its
+    // CA+Exam split. That's correct for a finished term with exams
+    // recorded, but mid-term - which is most of the time - there's
+    // usually no exam score yet, so "exam" silently defaulted to 0 and
+    // every student's total was capped at roughly 25%, regardless of how
+    // well they'd actually done on their tests. That's what was causing
+    // the unrealistically low numbers.
+    //
+    // It also explains students going missing: a student with NO exam
+    // score recorded for ANY subject/term was still included before (CA
+    // alone was enough to count), so that specific behavior wasn't the
+    // cause - but if you want exam performance folded back into this
+    // ranking later (once exams exist for the term), let me know and
+    // I'll add it as a separate, clearly-labelled column rather than
+    // silently blending it back into one number.
+    const { data: allWeekly, error: weeklyError } = await supabaseClient
         .from('weekly_test_results')
-        .select('student_id, subject_id, term_id, score')
+        .select('student_id, score')
         .in('student_id', studentIds);
 
-    const { data: allExams } = await supabaseClient
-        .from('exam_scores')
-        .select('student_id, subject_id, term_id, exam_score')
-        .in('student_id', studentIds);
+    if (weeklyError) {
+        container.innerHTML = `<p style="color:red;">Error: ${weeklyError.message}</p>`;
+        return;
+    }
 
-    // Group weekly scores by student+subject+term so CA can be normalized
-    // by however many weeks were actually tested, not just summed and
-    // capped — the same early-term-capping bug fixed everywhere else.
-    const weeklyGroups = {};
+    const scoresByStudent = {};
     (allWeekly || []).forEach(w => {
-        const key = `${w.student_id}|${w.subject_id}|${w.term_id}`;
-        if (!weeklyGroups[key]) weeklyGroups[key] = [];
-        weeklyGroups[key].push(w.score);
-    });
-
-    const examMap = {};
-    (allExams || []).forEach(e => {
-        const key = `${e.student_id}|${e.subject_id}|${e.term_id}`;
-        examMap[key] = e.exam_score;
-    });
-
-    const allKeys = new Set([...Object.keys(weeklyGroups), ...Object.keys(examMap)]);
-    const studentTotals = {};
-
-    allKeys.forEach(key => {
-        const studentId = parseInt(key.split('|')[0]);
-        const ca = calculateCA(weeklyGroups[key] || []);
-        const exam = Math.min(75, examMap[key] || 0);
-        const total = ca + exam;
-        if (!studentTotals[studentId]) studentTotals[studentId] = { sum: 0, count: 0 };
-        studentTotals[studentId].sum += total;
-        studentTotals[studentId].count += 1;
+        if (!scoresByStudent[w.student_id]) scoresByStudent[w.student_id] = [];
+        scoresByStudent[w.student_id].push(w.score);
     });
 
     const ranked = students
         .map(s => {
-            const t = studentTotals[s.id] || { sum: 0, count: 0 };
-            return { ...s, average: t.count > 0 ? t.sum / t.count : 0, recordsCount: t.count };
+            const scores = scoresByStudent[s.id] || [];
+            const average = scores.length > 0 ? scores.reduce((sum, v) => sum + v, 0) / scores.length : 0;
+            return { ...s, average, recordsCount: scores.length };
         })
         .filter(s => s.recordsCount > 0)
         .sort((a, b) => b.average - a.average);
