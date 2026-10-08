@@ -117,7 +117,7 @@ function getGradeColor(grade) {
 // itself is never shown anywhere in that feature, only the label.
 // ============================================================
 function getTestGradeLabel(percentage) {
-    if (percentage >= 90) return 'Standouts';
+    if (percentage >= 90) return 'Outstanding';
     if (percentage >= 70) return 'Champions';
     if (percentage >= 60) return 'Boosters';
     if (percentage >= 40) return 'Movers';
@@ -140,7 +140,7 @@ function getTestGradeColor(label) {
 // Numeric rank for sorting by band (lowest to highest), since band
 // names alone don't sort in a meaningful order alphabetically.
 function getTestGradeRank(label) {
-    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Standouts'];
+    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Outstanding'];
     const idx = order.indexOf(label);
     return idx === -1 ? order.length : idx;
 }
@@ -5564,6 +5564,9 @@ async function loadParentChildren() {
                     <button onclick="viewChildReportCard(${student.id}, '${student.full_name.replace(/'/g, "\\'")}')" class="btn-primary" style="font-size:0.8rem; padding:0.4rem 1rem; border:none; cursor:pointer;">
                         📄 Report Card
                     </button>
+                    <button onclick="viewChildWeeklyScores(${student.id}, '${student.full_name.replace(/'/g, "\\'")}')" class="btn-primary" style="font-size:0.8rem; padding:0.4rem 1rem; border:none; cursor:pointer;">
+                        📊 Weekly Scores
+                    </button>
                     <button onclick="loadParentChildAIAnalytics(${student.id})" class="btn-primary" style="font-size:0.8rem; padding:0.4rem 1rem; border:none; cursor:pointer;">
                         🤖 AI Analytics
                     </button>
@@ -5686,6 +5689,154 @@ async function viewChildAttendance(studentId, childName) {
                     Close
                 </button>
             </div>
+        </div>
+    `;
+}
+
+// ============================================================
+// PARENT VIEW: a child's weekly scores - the same two views a student
+// sees on their own dashboard (Weekly Averages and Weekly Test Grades),
+// for the active term. Weeks the admin hasn't published yet show as
+// "Pending", exactly like the student's own dashboard. This is enforced
+// by the database as well (a parent can only read a linked child's
+// scores for weeks that have been published), not just hidden here.
+// ============================================================
+async function viewChildWeeklyScores(studentId, childName) {
+    const container = document.getElementById('childReportCardContainer');
+    if (!container) return;
+
+    container.innerHTML = `<div class="glass-card"><p>⏳ Loading ${childName}'s weekly scores...</p></div>`;
+    container.scrollIntoView({ behavior: 'smooth' });
+
+    const { data: studentRow } = await supabaseClient
+        .from('students')
+        .select('id, class_id')
+        .eq('id', studentId)
+        .maybeSingle();
+
+    if (!studentRow) {
+        container.innerHTML = `<div class="glass-card"><p>Could not load this student's record.</p></div>`;
+        return;
+    }
+
+    const { data: termData } = await supabaseClient
+        .from('terms')
+        .select('id, name')
+        .eq('is_active', true)
+        .limit(1);
+    const term = termData?.[0];
+    if (!term) {
+        container.innerHTML = `<div class="glass-card"><p>No active term is set yet.</p></div>`;
+        return;
+    }
+
+    const { data: scores } = await supabaseClient
+        .from('weekly_test_results')
+        .select('week_number, score')
+        .eq('student_id', studentId)
+        .eq('term_id', term.id);
+
+    const { data: scheduledWeeks } = await supabaseClient
+        .from('weekly_test_schedule')
+        .select('week_number')
+        .eq('term_id', term.id)
+        .eq('class_id', studentRow.class_id);
+
+    const { data: publishRows } = await supabaseClient
+        .from('weekly_results_publish')
+        .select('week_number, published')
+        .eq('term_id', term.id)
+        .eq('class_id', studentRow.class_id);
+
+    const publishMap = {};
+    (publishRows || []).forEach(p => { publishMap[p.week_number] = p.published; });
+
+    const byWeek = {};
+    (scores || []).forEach(s => {
+        if (!byWeek[s.week_number]) byWeek[s.week_number] = [];
+        byWeek[s.week_number].push(s.score);
+    });
+
+    const weekNumbers = [...new Set((scheduledWeeks || []).map(w => w.week_number))].sort((a, b) => a - b);
+
+    const closeButton = `
+        <div style="text-align:center; margin-top:1rem;">
+            <button onclick="document.getElementById('childReportCardContainer').innerHTML=''" class="btn-secondary" style="border:none; cursor:pointer; padding:0.6rem 1.5rem;">
+                Close
+            </button>
+        </div>
+    `;
+
+    if (weekNumbers.length === 0) {
+        container.innerHTML = `
+            <div class="glass-card" style="max-width:800px; margin:0 auto;">
+                <h3 style="color:#4a2c1a;">${childName}'s Weekly Scores</h3>
+                <p>No weekly tests have been scheduled yet this term.</p>
+                ${closeButton}
+            </div>
+        `;
+        return;
+    }
+
+    let averagesHtml = '<div style="display:flex; gap:1rem; flex-wrap:wrap;">';
+    let gradesHtml = '<div style="display:flex; gap:1rem; flex-wrap:wrap;">';
+
+    weekNumbers.forEach(week => {
+        const isPublished = publishMap[week] === true;
+        const weekScores = byWeek[week] || [];
+
+        if (isPublished && weekScores.length > 0) {
+            const avg = weekScores.reduce((sum, s) => sum + s, 0) / weekScores.length;
+            const avgColor = avg >= 70 ? '#166534' : avg >= 50 ? '#d79b00' : '#b91c1c';
+            const label = getTestGradeLabel(avg);
+            const labelColor = getTestGradeColor(label);
+
+            averagesHtml += `
+                <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1.5rem; font-weight:bold; color:${avgColor};">${Math.round(avg)}%</div>
+                    <div style="font-size:0.75rem; color:#999;">${weekScores.length} subject${weekScores.length === 1 ? '' : 's'}</div>
+                </div>
+            `;
+            gradesHtml += `
+                <div class="glass-card" style="flex:1 1 130px; text-align:center; padding:1rem;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1.3rem; font-weight:bold; color:${labelColor}; margin-top:0.3rem;">${label}</div>
+                </div>
+            `;
+        } else {
+            averagesHtml += `
+                <div class="glass-card" style="flex:1 1 120px; text-align:center; padding:1rem; opacity:0.6;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1rem; font-weight:bold; color:#999;">🔒 Pending</div>
+                    <div style="font-size:0.75rem; color:#999;">Not yet published</div>
+                </div>
+            `;
+            gradesHtml += `
+                <div class="glass-card" style="flex:1 1 130px; text-align:center; padding:1rem; opacity:0.6;">
+                    <div style="font-size:0.85rem; color:#6b3a2a;">Week ${week}</div>
+                    <div style="font-size:1rem; font-weight:bold; color:#999; margin-top:0.3rem;">🔒 Pending</div>
+                </div>
+            `;
+        }
+    });
+
+    averagesHtml += '</div>';
+    gradesHtml += '</div>';
+
+    container.innerHTML = `
+        <div class="glass-card" style="max-width:900px; margin:0 auto;">
+            <h3 style="color:#4a2c1a;">${childName}'s Weekly Scores — ${term.name}</h3>
+
+            <h4 style="color:#4a2c1a; margin-top:1rem;">📊 Weekly Averages</h4>
+            <p style="font-size:0.9rem; color:#6b3a2a;">${childName}'s average score each week, across the subjects tested that week.</p>
+            ${averagesHtml}
+
+            <h4 style="color:#4a2c1a; margin-top:1.5rem;">🎯 Weekly Test Grades</h4>
+            <p style="font-size:0.9rem; color:#6b3a2a;">Performance band each week: Starters · Climbers · Movers · Boosters · Champions · Outstanding.</p>
+            ${gradesHtml}
+
+            ${closeButton}
         </div>
     `;
 }
