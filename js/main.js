@@ -25,6 +25,35 @@ function showMessage(elId, msg, isError = false) {
 }
 
 // ============================================================
+// Supabase/PostgREST caps a single query at 1000 rows by default.
+// A query scoped to one class or one student almost never hits that,
+// but an UNFILTERED "all classes" query (e.g. every weekly_test_results
+// row for the whole school in one week) can exceed it easily once the
+// school has enough students/subjects - and the extra rows are silently
+// dropped, with no error. This is exactly the "works for one class,
+// breaks for All Classes" symptom.
+//
+// Fix: fetch in pages of 1000 using .range(), accumulating until a
+// partial page comes back. buildQuery(from, to) must return the query
+// builder with .range(from, to) already applied.
+// ============================================================
+const SUPABASE_PAGE_SIZE = 1000;
+
+async function fetchAllRows(buildQuery) {
+    let allRows = [];
+    let from = 0;
+    while (true) {
+        const to = from + SUPABASE_PAGE_SIZE - 1;
+        const { data, error } = await buildQuery(from, to);
+        if (error) return { data: null, error };
+        allRows = allRows.concat(data || []);
+        if (!data || data.length < SUPABASE_PAGE_SIZE) break;
+        from += SUPABASE_PAGE_SIZE;
+    }
+    return { data: allRows, error: null };
+}
+
+// ============================================================
 // Sends ONE email through the admin-only send-email Edge Function.
 // It attaches the signed-in admin's own login session, and the server
 // refuses anyone who isn't a logged-in administrator. (Previously this
@@ -88,7 +117,7 @@ function getGradeColor(grade) {
 // itself is never shown anywhere in that feature, only the label.
 // ============================================================
 function getTestGradeLabel(percentage) {
-    if (percentage >= 90) return 'Outstanding';
+    if (percentage >= 90) return 'Standouts';
     if (percentage >= 70) return 'Champions';
     if (percentage >= 60) return 'Boosters';
     if (percentage >= 40) return 'Movers';
@@ -111,7 +140,7 @@ function getTestGradeColor(label) {
 // Numeric rank for sorting by band (lowest to highest), since band
 // names alone don't sort in a meaningful order alphabetically.
 function getTestGradeRank(label) {
-    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Outstanding'];
+    const order = ['Starters', 'Climbers', 'Movers', 'Boosters', 'Champions', 'Standouts'];
     const idx = order.indexOf(label);
     return idx === -1 ? order.length : idx;
 }
@@ -4859,19 +4888,22 @@ async function getExplicitEnrollment(subjectId) {
 // either week simply aren't compared (nothing to compare against).
 // ============================================================
 async function compareWeeklyTestGrades(weekNumber, termId, classId) {
-    const container = document.getElementById('gradeComparisonResults');
-    if (!container) return;
+    const statusEl = document.getElementById('gradeComparisonResults');
+    if (!statusEl) return;
 
     if (!termId) {
-        container.innerHTML = '<p style="color:#b91c1c;">Please select a term.</p>';
+        statusEl.innerHTML = '<p style="color:#b91c1c;">Please select a term.</p>';
         return;
     }
     if (!weekNumber || weekNumber < 2) {
-        container.innerHTML = '<p style="color:#b91c1c;">Please choose a week of 2 or higher — there\'s no earlier week to compare Week 1 against.</p>';
+        statusEl.innerHTML = '<p style="color:#b91c1c;">Please choose a week of 2 or higher — there\'s no earlier week to compare Week 1 against.</p>';
         return;
     }
 
-    container.innerHTML = '<p>⏳ Comparing...</p>';
+    statusEl.innerHTML = '<p>⏳ Comparing...</p>';
+
+    const { data: termRow } = await supabaseClient.from('terms').select('name').eq('id', termId).maybeSingle();
+    const termName = termRow?.name || `Term ${termId}`;
 
     const previousWeek = weekNumber - 1;
 
@@ -4882,7 +4914,7 @@ async function compareWeeklyTestGrades(weekNumber, termId, classId) {
 
     if (currentData.error || previousData.error) {
         const err = currentData.error || previousData.error;
-        container.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
+        statusEl.innerHTML = `<p style="color:red;">Error: ${err.message}</p>`;
         return;
     }
 
@@ -4925,28 +4957,70 @@ async function compareWeeklyTestGrades(weekNumber, termId, classId) {
     declined.sort((a, b) => a.name.localeCompare(b.name));
 
     if (improved.length === 0 && declined.length === 0 && unchangedCount === 0) {
-        container.innerHTML = `<p>No students have scores recorded in both Week ${previousWeek} and Week ${weekNumber} yet, so there's nothing to compare.</p>`;
+        statusEl.innerHTML = `<p>No students have scores recorded in both Week ${previousWeek} and Week ${weekNumber} yet, so there's nothing to compare.</p>`;
         return;
     }
 
-    let html = `<p style="color:#666; font-size:0.9rem;">Comparing Week ${previousWeek} → Week ${weekNumber}. ${improved.length} improved, ${declined.length} declined, ${unchangedCount} unchanged (students without a score in both weeks aren't shown).</p>`;
+    function renderList(title, color, list) {
+        if (list.length === 0) {
+            return `<h3 style="color:${color};">${title} (0)</h3><p style="color:#999;">None.</p>`;
+        }
+        return `
+            <h3 style="color:${color};">${title} (${list.length})</h3>
+            <table style="width:100%; border-collapse:collapse; margin-bottom:1.5rem;">
+                <thead>
+                    <tr style="background:#4a2c1a; color:white;">
+                        <th style="padding:8px;">Student</th>
+                        <th style="padding:8px;">Class</th>
+                        <th style="padding:8px;">Week ${previousWeek}</th>
+                        <th style="padding:8px;">Week ${weekNumber}</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${list.map(e => `
+                        <tr style="border-bottom:1px solid #ddd;">
+                            <td style="padding:8px;"><strong>${e.name}</strong></td>
+                            <td style="padding:8px;">${e.className}</td>
+                            <td style="padding:8px;">${e.prevLabel}</td>
+                            <td style="padding:8px; font-weight:bold; color:${color};">${e.currLabel}</td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+    }
 
-    html += `<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap:1.5rem; margin-top:1rem;">`;
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(`
+        <html>
+        <head>
+            <title>Test Grade Changes - Week ${previousWeek} to Week ${weekNumber}</title>
+            <style>
+                body { font-family: Arial, sans-serif; padding: 40px; }
+                table { width: 100%; border-collapse: collapse; }
+                th { background: #4a2c1a; color: white; padding: 8px; text-align: left; }
+                td { padding: 8px; border-bottom: 1px solid #ddd; }
+                hr { border: 1px solid #d4a373; margin: 1rem 0; }
+                @media print { body { padding: 0; } }
+            </style>
+        </head>
+        <body>
+            <h2 style="text-align:center; color:#4a2c1a;">Wonderhills College</h2>
+            <p style="text-align:center;">Test Grade Changes — Week ${previousWeek} → Week ${weekNumber} | ${termName}</p>
+            <p style="text-align:center; font-size:0.85rem; color:#666;">${improved.length} improved, ${declined.length} declined, ${unchangedCount} unchanged. Students without a score in both weeks aren't shown.</p>
+            <hr>
+            ${renderList('📈 Improved', '#166534', improved)}
+            ${renderList('📉 Declined', '#b91c1c', declined)}
+            <p style="text-align:center; margin-top:20px;">© 2026 Wonderhills College</p>
+            <div class="no-print" style="text-align:center; margin-top:20px;">
+                <button onclick="window.print()" style="padding:10px 30px; background:#1a3c5e; color:white; border:none; border-radius:6px; cursor:pointer;">Print / Save as PDF</button>
+            </div>
+        </body>
+        </html>
+    `);
+    printWindow.document.close();
 
-    html += `<div><h4 style="color:#166534;">📈 Improved (${improved.length})</h4>`;
-    html += improved.length === 0
-        ? `<p style="color:#999;">None.</p>`
-        : `<ul style="padding-left:1.2rem; margin:0;">${improved.map(e => `<li style="margin-bottom:0.3rem;"><strong>${e.name}</strong> <span style="color:#999; font-size:0.85rem;">(${e.className})</span><br>${e.prevLabel} → <span style="color:#166534; font-weight:bold;">${e.currLabel}</span></li>`).join('')}</ul>`;
-    html += `</div>`;
-
-    html += `<div><h4 style="color:#b91c1c;">📉 Declined (${declined.length})</h4>`;
-    html += declined.length === 0
-        ? `<p style="color:#999;">None.</p>`
-        : `<ul style="padding-left:1.2rem; margin:0;">${declined.map(e => `<li style="margin-bottom:0.3rem;"><strong>${e.name}</strong> <span style="color:#999; font-size:0.85rem;">(${e.className})</span><br>${e.prevLabel} → <span style="color:#b91c1c; font-weight:bold;">${e.currLabel}</span></li>`).join('')}</ul>`;
-    html += `</div>`;
-
-    html += `</div>`;
-    container.innerHTML = html;
+    statusEl.innerHTML = '<p style="color:#166534; font-weight:bold;">✅ Opened in a new tab.</p>';
 }
 
 // ============================================================
@@ -5900,20 +5974,34 @@ async function downloadAllReportCards(termId, classId, studentIds) {
         return;
     }
 
-    const { data: allWeekly } = await supabaseClient
-        .from('weekly_test_results')
-        .select('student_id, subject_id, week_number, score, subjects(name)')
-        .eq('term_id', termId);
+    // Paginated - this previously had NO student filter at all, so for a
+    // school with enough weekly_test_results rows in one term, it could
+    // silently exceed Supabase's 1000-row cap and quietly drop some
+    // students' scores from their report card, even when downloading
+    // for just one student or one class.
+    const { data: allWeekly } = await fetchAllRows((from, to) =>
+        supabaseClient
+            .from('weekly_test_results')
+            .select('student_id, subject_id, week_number, score, subjects(name)')
+            .eq('term_id', termId)
+            .range(from, to)
+    );
 
-    const { data: allExams } = await supabaseClient
-        .from('exam_scores')
-        .select('student_id, subject_id, exam_score, teacher_comment')
-        .eq('term_id', termId);
+    const { data: allExams } = await fetchAllRows((from, to) =>
+        supabaseClient
+            .from('exam_scores')
+            .select('student_id, subject_id, exam_score, teacher_comment')
+            .eq('term_id', termId)
+            .range(from, to)
+    );
 
-    const { data: allCharacter } = await supabaseClient
-        .from('character_assessment')
-        .select('*')
-        .eq('term_id', termId);
+    const { data: allCharacter } = await fetchAllRows((from, to) =>
+        supabaseClient
+            .from('character_assessment')
+            .select('*')
+            .eq('term_id', termId)
+            .range(from, to)
+    );
 
     const signatureUrl = await getPrincipalSignatureUrl();
 
@@ -6007,10 +6095,17 @@ async function loadBestGraduatingStudents(classId) {
     // ranking later (once exams exist for the term), let me know and
     // I'll add it as a separate, clearly-labelled column rather than
     // silently blending it back into one number.
-    const { data: allWeekly, error: weeklyError } = await supabaseClient
-        .from('weekly_test_results')
-        .select('student_id, score')
-        .in('student_id', studentIds);
+    // Paginated - with "All Classes" selected, studentIds covers the
+    // whole school and this pulls their ENTIRE history across every
+    // term, which can exceed the 1000-row cap easily for a school of
+    // any real size.
+    const { data: allWeekly, error: weeklyError } = await fetchAllRows((from, to) =>
+        supabaseClient
+            .from('weekly_test_results')
+            .select('student_id, score')
+            .in('student_id', studentIds)
+            .range(from, to)
+    );
 
     if (weeklyError) {
         container.innerHTML = `<p style="color:red;">Error: ${weeklyError.message}</p>`;
@@ -6128,18 +6223,22 @@ async function downloadAllCumulativeScores(termId, classId, studentIds) {
         matchingStudentIds = (classStudents || []).map(s => s.id);
     }
 
-    let resultsQuery = supabaseClient
-        .from('weekly_test_results')
-        .select(`
-            student_id,
-            subject_id,
-            score,
-            students (full_name, admission_number, class_id, classes(name))
-        `)
-        .eq('term_id', termId);
-    if (matchingStudentIds) resultsQuery = resultsQuery.in('student_id', matchingStudentIds);
-
-    const { data: results, error } = await resultsQuery;
+    // Paginated for the same reason as the weekly sheet above - an
+    // unfiltered "All Classes" request across a whole term can exceed
+    // Supabase's default 1000-row cap.
+    const { data: results, error } = await fetchAllRows((from, to) => {
+        let q = supabaseClient
+            .from('weekly_test_results')
+            .select(`
+                student_id,
+                subject_id,
+                score,
+                students (full_name, admission_number, class_id, classes(name))
+            `)
+            .eq('term_id', termId);
+        if (matchingStudentIds) q = q.in('student_id', matchingStudentIds);
+        return q.range(from, to);
+    });
 
     if (error) {
         statusEl.textContent = '❌ Error: ' + error.message;
@@ -6290,18 +6389,24 @@ async function downloadWeeklyTestSheet(weekNumber, termId, classId, studentIds) 
 
     // No subject breakdown here on purpose — just each student's total and
     // percentage for the week, exactly as requested.
-    let resultsQuery = supabaseClient
-        .from('weekly_test_results')
-        .select(`
-            student_id,
-            score,
-            students (full_name, admission_number, class_id, classes(name, section))
-        `)
-        .eq('week_number', weekNumber)
-        .eq('term_id', termId);
-    if (matchingStudentIds) resultsQuery = resultsQuery.in('student_id', matchingStudentIds);
-
-    const { data: results, error } = await resultsQuery;
+    //
+    // Paginated (not a single query) because an unfiltered "All Classes"
+    // request for one week, across the whole school, can exceed
+    // Supabase's default 1000-row cap - the exact "works for one class,
+    // fails for All Classes" symptom this was causing.
+    const { data: results, error } = await fetchAllRows((from, to) => {
+        let q = supabaseClient
+            .from('weekly_test_results')
+            .select(`
+                student_id,
+                score,
+                students (full_name, admission_number, class_id, classes(name, section))
+            `)
+            .eq('week_number', weekNumber)
+            .eq('term_id', termId);
+        if (matchingStudentIds) q = q.in('student_id', matchingStudentIds);
+        return q.range(from, to);
+    });
 
     if (error) {
         statusEl.textContent = '❌ Error: ' + error.message;
@@ -6773,15 +6878,18 @@ async function downloadWeeklyTestGrades(weekNumber, termId, classId, studentIds)
 // download and certificate generation so the two can never disagree
 // about who's actually in the Top 5 for a given week.
 async function computeWeeklyRankings(weekNumber, termId) {
-    const { data: results, error } = await supabaseClient
-        .from('weekly_test_results')
-        .select(`
-            student_id,
-            score,
-            students (full_name, admission_number, class_id, classes(name, section))
-        `)
-        .eq('week_number', weekNumber)
-        .eq('term_id', termId);
+    const { data: results, error } = await fetchAllRows((from, to) =>
+        supabaseClient
+            .from('weekly_test_results')
+            .select(`
+                student_id,
+                score,
+                students (full_name, admission_number, class_id, classes(name, section))
+            `)
+            .eq('week_number', weekNumber)
+            .eq('term_id', termId)
+            .range(from, to)
+    );
 
     if (error) return { junior: [], senior: [], unrecognized: [], error };
     if (!results || results.length === 0) return { junior: [], senior: [], unrecognized: [], error: null };
